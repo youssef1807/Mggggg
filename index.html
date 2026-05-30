@@ -1023,8 +1023,17 @@ el.innerHTML=`<div style="font-weight:800;font-size:12px;margin-bottom:10px">�
 <div class="field" style="margin-bottom:10px"><label>Date</label><input type="date" id="dv-date" value="${today()}"/></div>
 <button class="btn btn-green btn-full" onclick="saveVersement('${key}')">✅ Enregistrer</button>`;
 }else{
+const prixUr=+d.prixEstime||0;
 el.innerHTML=`<div style="font-weight:800;font-size:12px;margin-bottom:10px">↩ Retour en stock</div>
-<div class="field" style="margin-bottom:10px"><label>Quantité à récupérer (max: ${qtyDispo})</label><input type="number" id="dr-qty" min="1" max="${qtyDispo}" placeholder="${qtyDispo}"/></div>
+<div class="field" style="margin-bottom:8px">
+<label>Montant remboursé (F) — max: ${prixUr?cfa(qtyDispo*prixUr):qtyDispo+" unités"}</label>
+<input type="number" id="dr-montant" placeholder="ex: 27000" oninput="calcRetourQty('${key}',this.value)"/>
+</div>
+<div style="background:var(--bg);border-radius:9px;padding:10px 12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">
+<span style="font-size:11px;color:var(--muted)">Unités récupérées</span>
+<span id="dr-qty-preview" style="font-family:monospace;font-weight:800;font-size:15px;color:var(--amber)">—</span>
+</div>
+<input type="hidden" id="dr-qty" value="0"/>
 <button class="btn btn-amber btn-full" onclick="saveRetourDepot('${key}')">↩ Récupérer le stock</button>`;
 }
 }
@@ -1042,6 +1051,19 @@ if(preview)preview.textContent=qty+" unités";
 if(qtyInput)qtyInput.value=qty;
 }
 window.calcQtyFromMontant=calcQtyFromMontant;
+
+function calcRetourQty(key,montantStr){
+const d=getDepots().find(d=>d._key===key);if(!d)return;
+const montant=+montantStr||0;
+const prixU=+d.prixEstime||0;
+const preview=document.getElementById("dr-qty-preview");
+const qtyInput=document.getElementById("dr-qty");
+if(!prixU||!montant){if(preview)preview.textContent="—";return;}
+const qty=Math.round(montant/prixU);
+if(preview)preview.textContent=qty+" unités";
+if(qtyInput)qtyInput.value=qty;
+}
+window.calcRetourQty=calcRetourQty;
 
 async function saveVersement(key){
 const d=getDepots().find(d=>d._key===key);if(!d)return;
@@ -1066,9 +1088,13 @@ window.saveVersement=saveVersement;
 
 async function saveRetourDepot(key){
 const d=getDepots().find(d=>d._key===key);if(!d)return;
-const qty=+document.getElementById("dr-qty").value;
+const montantRetour=+document.getElementById("dr-montant")?.value||0;
+const prixU=+d.prixEstime||0;
+let qty=+document.getElementById("dr-qty").value||0;
+if(!qty&&prixU&&montantRetour)qty=Math.round(montantRetour/prixU);
+if(!qty)qty=+prompt("Nombre d'unités à récupérer :",1)||1;
 const qtyDispo=Math.max(0,(+d.qtyDeposited||0)-(+d.qtySold||0)-(+d.qtyReturned||0));
-if(!qty||qty>qtyDispo)return alert(`Quantité invalide (max: ${qtyDispo})`);
+if(qty>qtyDispo)return alert("Quantité dépasse le restant (max: "+qtyDispo+")");
 if(!confirm(`Récupérer ${qty} unités en stock ?`))return;
 const p=getP(d.productId);
 if(p)await fbSetProduct({...p,stock:p.stock+qty});
