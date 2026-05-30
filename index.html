@@ -227,6 +227,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Syne',
 <button class="nav-btn" id="nav-depots" onclick="goTab('depots')"><span class="ico">🏪</span><span class="lbl">Dépôts</span></button>
 <button class="nav-btn" id="nav-credits" onclick="goTab('credits')"><span class="ico">🤝</span><span class="lbl">Crédits</span></button>
 <button class="nav-btn" id="nav-caisse" onclick="goTab('caisse')" style="display:none"><span class="ico">🏦</span><span class="lbl">Caisse</span></button>
+<button class="nav-btn" id="nav-commandes" onclick="goTab('commandes')" style="display:none"><span class="ico">📬</span><span class="lbl">Cmdés</span></button>
 <button class="nav-btn" id="nav-more" onclick="toggleMoreMenu()"><span class="ico">⋯</span><span class="lbl">Plus</span></button>
 </nav>
 <!-- MORE MENU -->
@@ -465,6 +466,7 @@ onValue(ref(db,"moves"),(snap)=>{fbMoves=snap.val()||{};if(role)render();});
 initDepotListener();
 initDepensesListener();
 initCaisseCreditsListeners();
+initCommandesListener();
 onValue(ref(db,".info/connected"),(snap)=>{setSyncStatus(snap.val()?"online":"offline");});
 }catch(e){
 console.warn("Firebase error:", e.message);
@@ -544,6 +546,7 @@ else{b.className="role-badge role-employe";b.textContent="👤 Employé";}
 document.getElementById("nav-depots").style.display="flex";
 document.getElementById("nav-depenses").style.display=role==="admin"?"flex":"none";
 document.getElementById("nav-caisse").style.display=role==="admin"?"flex":"none";
+document.getElementById("nav-commandes").style.display=role==="admin"?"flex":"none";
 document.getElementById("nav-credits").style.display="flex";
 document.getElementById("btn-stock").style.display=role==="admin"?"inline-flex":"none";
 currentTab=role==="admin"?"dashboard":"rapport";
@@ -649,7 +652,37 @@ function prodOptions(selectedId){
 return'<option value="">— Choisir —</option>'+getProducts().map(p=>`<option value="${p.id}"${+p.id===+selectedId?" selected":""}>${p.name} (stock: ${p.stock})</option>`).join("");
 }
 
-function addVente(type){currentRapport.ventes.push({id:Date.now(),productId:"",qty:1,price:0,type});renderRapport();}
+function toggleCredit(id,checked){
+const v=currentRapport.ventes.find(v=>v.id===id);
+if(!v)return;
+v.isCredit=checked;
+if(!checked)v.clientCredit="";
+renderRapport();
+setTimeout(()=>currentRapport.ventes.filter(x=>x.type!=="depot").forEach(x=>refreshPreview(x.id)),100);
+}
+window.toggleCredit=toggleCredit;
+
+function selectClientCredit(id, value){
+const v=currentRapport.ventes.find(v=>v.id===id);
+if(!v)return;
+if(value==="__nouveau__"){
+  v.creditKey="__nouveau__";
+  v.clientCredit="";
+}else if(value){
+  // Existing credit client
+  const c=getCredits().find(c=>c._key===value);
+  v.creditKey=value;
+  v.clientCredit=c?c.client:"";
+}else{
+  v.creditKey="";
+  v.clientCredit="";
+}
+renderRapport();
+setTimeout(()=>currentRapport.ventes.filter(x=>x.type!=="depot").forEach(x=>refreshPreview(x.id)),100);
+}
+window.selectClientCredit=selectClientCredit;
+
+function addVente(type){currentRapport.ventes.push({id:Date.now(),productId:"",qty:1,price:0,type,isCredit:false,clientCredit:""});renderRapport();}
 window.addVente=addVente;
 
 function removeVente(id){currentRapport.ventes=currentRapport.ventes.filter(v=>v.id!==id);renderRapport();}
@@ -689,6 +722,19 @@ ${isDepot?`<div class="field" style="margin-bottom:8px"><label>Dépôt destinata
 ${isDepot?`<div class="field"><label>Prix estimé/u (F)</label><input type="number" min="0" value="${v.price||""}" placeholder="0" oninput="updateVente(${v.id},'price',this.value)"/></div>`:`<div class="field"><label>Prix/u (F) — 0=Cadeau</label><input type="number" min="0" value="${v.price===0&&v.productId?"0":v.price||""}" placeholder="0" oninput="updateVente(${v.id},'price',this.value)"/></div>`}
 </div>
 ${isDepot?`<div style="background:#f59e0b14;border:1px solid #f59e0b30;border-radius:8px;padding:8px 10px;font-size:11px;color:var(--amber);margin-top:6px">📦 Ce stock sera ajouté au dépôt sélectionné à la validation</div>`:`<div id="prev-${v.id}" style="margin-top:8px;display:none"></div>`}
+${!isDepot?`<div style="margin-top:8px;background:${v.isCredit?"#3b82f614":"var(--bg)"};border:1px solid ${v.isCredit?"#3b82f633":"var(--border)"};border-radius:9px;padding:10px 12px">
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:${v.isCredit?8:0}px">
+<input type="checkbox" id="cr-${v.id}" ${v.isCredit?"checked":""} onchange="toggleCredit(${v.id},this.checked)" style="width:18px;height:18px;cursor:pointer"/>
+<label for="cr-${v.id}" style="font-size:12px;font-weight:700;color:var(--blue);cursor:pointer">🤝 Vente à crédit</label>
+</div>
+${v.isCredit?`<div class="field"><label>Client</label>
+<select onchange="selectClientCredit(${v.id},this.value)" style="margin-bottom:6px">
+<option value="">— Choisir ou créer —</option>
+<option value="__nouveau__">➕ Nouveau client</option>
+${getCredits().filter(c=>c.status!=="soldé").map(c=>`<option value="${c._key}" ${v.creditKey===c._key?"selected":""}>${c.client} (doit ${cfa(+c.montantRestant||0)})</option>`).join("")}
+</select>
+${v.creditKey==="__nouveau__"||(!v.creditKey&&v.clientCredit)?`<input type="text" value="${v.clientCredit||""}" placeholder="Nom du nouveau client" oninput="updateVente(${v.id},'clientCredit',this.value)" style="margin-top:4px"/>`:""}`:""}
+</div>`:""}
 </div>`;
 }
 
@@ -745,14 +791,37 @@ const p=getP(v.productId);
 await fbSetProduct({...p,stock:p.stock-v.qty});
 await fbAddMove({productId:p.id,productName:p.name,type:"out",qty:v.qty,date:dateStr,note:v.isGift?"Cadeau":"Vente "+v.type});
 }
-// Enregistrer le rapport (ventes normales uniquement dans les stats)
+// Enregistrer le rapport
 const tousVentes=[...ventesF,...lignesDepot.map(v=>{const p=getP(v.productId);return{...v,productName:p.name,costPrice:p.costPrice,profit:0,isGift:false};})];
 await fbAddRapport({date:dateStr,ventes:tousVentes,totals:calcTotals(ventesF),source:"manual"});
 for(const v of ventesF.filter(v=>!v.isGift)){
-await fbAddSale({productId:+v.productId,productName:v.productName,qty:v.qty,salePrice:v.price,costPrice:v.costPrice,type:v.type,date:dateStr,profit:v.profit});
+await fbAddSale({productId:+v.productId,productName:v.productName,qty:v.qty,salePrice:v.price,costPrice:v.costPrice,type:v.type,date:dateStr,profit:v.profit,isCredit:!!v.isCredit});
+}
+// Créer ou mettre à jour les crédits pour les ventes à crédit
+const ventesCredit=ventesF.filter(v=>v.isCredit&&!v.isGift);
+for(const v of ventesCredit){
+const montant=v.price*v.qty;
+const noteVente=v.qty+"x "+v.productName+" ("+dateStr+")";
+if(v.creditKey&&v.creditKey!=="__nouveau__"){
+  // Ajouter au crédit existant
+  const existing=getCredits().find(c=>c._key===v.creditKey);
+  if(existing){
+  const newMontantInitial=(+existing.montantInitial||0)+montant;
+  const newMontantRestant=(+existing.montantRestant||0)+montant;
+  const historique=[...(existing.historique||[]),{date:dateStr,montant,note:noteVente}];
+  await set(ref(db,"credits/"+existing._key),{...existing,montantInitial:newMontantInitial,montantRestant:newMontantRestant,historique,status:"en cours"});
+  }
+}else{
+  // Nouveau crédit
+  const k=push(ref(db,"credits")).key;
+  await set(ref(db,"credits/"+k),{_key:k,client:v.clientCredit||"Client inconnu",montantInitial:montant,montantRestant:montant,date:dateStr,note:noteVente,status:"en cours",remboursements:[],historique:[{date:dateStr,montant,note:noteVente}],fromRapport:true});
+}
 }
 currentRapport={ventes:[]};rapportMode="choose";
-alert("✅ Rapport validé !"+(lignesDepot.length?`\n📦 ${lignesDepot.length} dépôt(s) réapprovisionné(s)`:""));render();
+let msg="✅ Rapport validé !";
+if(lignesDepot.length)msg+="\n📦 "+lignesDepot.length+" dépôt(s) réapprovisionné(s)";
+if(ventesCredit.length)msg+="\n🤝 "+ventesCredit.length+" crédit(s) créé(s) automatiquement";
+alert(msg);render();
 }
 window.validerRapport=validerRapport;
 
@@ -802,10 +871,14 @@ Pour chaque ligne identifiée, retourne:
 - price: prix unitaire en F CFA (0 si cadeau)
 - type: "depot" si réapprovisionnement dépôt, "gros" si vente en gros explicite, "detail" sinon
 - depotNom: nom du dépôt si type="depot", sinon ""
-- isGift: true si cadeau, false sinon
+- isGift: true si cadeau/offert, false sinon
+- isCredit: true si vente à crédit (mots: "crédit","credit","cr","dette","doit","à cr"), false sinon
+- clientCredit: nom du client si isCredit=true, sinon ""
+
+IMPORTANT: Détecte bien les ventes à crédit — souvent noté "Nom client - crédit" ou "cr" à côté du montant.
 
 Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans backticks, sans explication:
-{"ventes":[{"productId":1,"productName":"Elf Bar 600","qty":10,"price":3500,"type":"depot","depotNom":"Stand Marché","isGift":false}],"notes":""}`;
+{"ventes":[{"productId":1,"productName":"Elf Bar 600","qty":1,"price":3500,"type":"detail","depotNom":"","isGift":false,"isCredit":true,"clientCredit":"Mamadou"}],"notes":""}`;
 try{
 const resp=await fetch(GEMINI_URL,{
 method:"POST",
@@ -863,6 +936,8 @@ price:+v.price||0,
 type:v.type==="depot"?"depot":v.type==="gros"?"gros":"detail",
 depotNom:v.depotNom||"",
 isGift:!!v.isGift,
+isCredit:!!v.isCredit,
+clientCredit:v.clientCredit||"",
 }));
 rapportMode="manual";
 if(parsed.notes&&parsed.notes.trim())alert("📝 Note IA: "+parsed.notes);
@@ -1388,10 +1463,16 @@ const addEntry=(date,label,montant,type)=>{
   else allDays[date].sorties.push({label,montant:Math.abs(montant),type});
 };
 
-// Ventes depuis rapports
+// Ventes depuis rapports (hors crédits)
 getRapports().forEach(r=>{
   if(!r.totals||r.source==="zero")return;
-  if(r.totals.totalCA>0)addEntry(r.date,"💰 Ventes ("+r.totals.nbVentes+" ventes)",r.totals.totalCA,"vente");
+  // Calculer CA réel = CA total - ventes à crédit
+  const ventesCredit=(r.ventes||[]).filter(v=>v.isCredit&&!v.isGift);
+  const caCredit=ventesCredit.reduce((a,v)=>a+(v.price||0)*(v.qty||0),0);
+  const caReel=r.totals.totalCA-caCredit;
+  const nbVentesReelles=(r.totals.nbVentes||0)-ventesCredit.length;
+  if(caReel>0)addEntry(r.date,"💰 Ventes ("+nbVentesReelles+" ventes)",caReel,"vente");
+  if(caCredit>0)addEntry(r.date,"🤝 Ventes à crédit ("+ventesCredit.length+")",caCredit,"credit_note");
 });
 
 // Versements dépôts
@@ -1411,11 +1492,16 @@ getCredits().forEach(c=>{
 // Dépenses
 const depenses=toArr(fbDepenses);
 depenses.forEach(d=>{
-  const [y,m]=d.mois.split("-");
+  if(!d.mois)return;
   const dateRef=d.mois+"-01";
   (d.lignes||[]).forEach(l=>{
-    addEntry(dateRef,"💸 "+l.cat,-l.montant,"depense");
+    if(!l.cat||!l.montant)return;
+    addEntry(dateRef,"💸 "+(l.cat||"Dépense"),-l.montant,"depense");
   });
+});
+// Apports manuels en caisse
+(toArr(fbCaisseConfig.apports||{})).forEach(a=>{
+  addEntry(a.date,"💵 Apport: "+(a.note||"Manuel"),+a.montant,"apport");
 });
 
 const sortedDates=Object.keys(allDays).sort((a,b)=>b.localeCompare(a));
@@ -1430,7 +1516,10 @@ const soldeActuel=soldeDepart+totalEntrees-totalSorties;
 
 el.innerHTML=`
 <div class="sec-head"><span class="sec-title">🏦 Caisse</span>
-<button class="btn btn-ghost btn-sm" onclick="setSoldeDepart()">⚙️ Solde départ</button>
+<div style="display:flex;gap:6px">
+<button class="btn btn-green btn-sm" onclick="openApportCaisse()">+ Apport</button>
+<button class="btn btn-ghost btn-sm" onclick="setSoldeDepart()">⚙️</button>
+</div>
 </div>
 
 <div style="background:${soldeActuel>=0?"#22c55e14":"#ef444414"};border:1px solid ${soldeActuel>=0?"#22c55e44":"#ef444444"};border-radius:16px;padding:18px;margin-bottom:16px;text-align:center">
@@ -1479,6 +1568,294 @@ await set(ref(db,"caisseConfig/soldeDepart"),montant);
 render();
 }
 window.setSoldeDepart=setSoldeDepart;
+
+function openApportCaisse(){
+const html=`<div class="overlay" id="modal-apport" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">💵 Apport en caisse</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-apport');document.getElementById('modal-apport').remove()">✕</button></div>
+<div class="sheet-body">
+<div class="field"><label>Montant (F CFA)</label><input type="number" id="ap-montant" placeholder="ex: 50000"/></div>
+<div class="field"><label>Date</label><input type="date" id="ap-date" value="${today()}"/></div>
+<div class="field"><label>Note (optionnel)</label><input type="text" id="ap-note" placeholder="ex: Apport personnel, remise fournisseur..."/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-apport');document.getElementById('modal-apport').remove()">Annuler</button>
+<button class="btn btn-green" style="flex:2" onclick="saveApport()">✅ Ajouter</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.openApportCaisse=openApportCaisse;
+
+// ── COMMANDES ──────────────────────────────────────────────────────────────────
+let fbCommandes={};
+function initCommandesListener(){
+onValue(ref(db,"commandes"),(snap)=>{fbCommandes=snap.val()||{};if(role&&currentTab==="commandes")render();});
+}
+const getCommandes=()=>toArr(fbCommandes).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+
+function renderCommandes(){
+const el=document.getElementById("content");if(!el)return;
+const commandes=getCommandes();
+const enAttente=commandes.filter(c=>c.status==="en_attente");
+const recues=commandes.filter(c=>c.status==="reçue");
+const totalEnAttente=enAttente.reduce((a,c)=>a+(+c.totalMontant||0),0);
+
+el.innerHTML=`
+<div class="sec-head"><span class="sec-title">📬 Commandes</span>
+<button class="btn btn-primary btn-sm" onclick="openAddCommande()">+ Nouvelle</button>
+</div>
+
+${enAttente.length?`<div style="background:#f59e0b14;border:1px solid #f59e0b33;border-radius:12px;padding:12px 14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center">
+<span style="font-size:12px;font-weight:700;color:var(--muted)">🚚 En attente de livraison</span>
+<span style="font-family:monospace;font-weight:800;font-size:16px;color:var(--amber)">${cfa(totalEnAttente)}</span>
+</div>`:""}
+
+${enAttente.length===0&&recues.length===0?`<div class="empty">Aucune commande.<br>Crée ta première commande fournisseur !</div>`:""}
+
+${enAttente.length?`<div style="font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🟡 En attente (${enAttente.length})</div>
+${enAttente.map(commandeCardHtml).join("")}`:""}
+
+${recues.length?`<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:12px 0 8px">✅ Reçues (${recues.length})</div>
+${recues.map(commandeCardHtml).join("")}`:""}`;
+}
+
+function commandeCardHtml(c){
+const lignes=c.lignes||[];
+const total=+c.totalMontant||0;
+const isEnAttente=c.status==="en_attente";
+return`<div class="card" style="border-color:${isEnAttente?"#f59e0b55":"#22c55e33"};margin-bottom:10px">
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+<div>
+<div style="font-weight:800;font-size:14px">${c.fournisseur||"Commande"}</div>
+<div style="font-size:11px;color:var(--muted);margin-top:2px">${c.date||"—"}${c.dateReception?" · Reçu le "+c.dateReception:""}</div>
+</div>
+${tag(isEnAttente?"🚚 En attente":"✅ Reçue",isEnAttente?"amber":"green")}
+</div>
+<div style="margin-bottom:10px">
+${lignes.map(l=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
+<span style="font-weight:600">${l.produit} × ${l.qty}</span>
+<span style="font-family:monospace">${cfa(l.prixRevient*l.qty)}</span>
+</div>`).join("")}
+<div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:800">
+<span>Total commande</span>
+<span style="font-family:monospace;color:var(--amber)">${cfa(total)}</span>
+</div>
+</div>
+${isEnAttente?`<button class="btn btn-green btn-full" onclick="confirmerReception('${c._key}')">📦 Confirmer réception → Ajouter au stock</button>`:""}
+${c.note?`<div style="font-size:11px;color:var(--muted);margin-top:8px;font-style:italic">${c.note}</div>`:""}
+</div>`;
+}
+
+function openAddCommande(){
+// Build lignes dynamically
+let lignesHTML=`<div id="cmd-lignes" style="display:flex;flex-direction:column;gap:10px"></div>
+<button class="btn btn-ghost btn-sm btn-full" onclick="addCmdLigne()" style="margin-top:6px">+ Ajouter un produit</button>`;
+
+const html=`<div class="overlay" id="modal-commande" style="display:flex">
+<div class="sheet" style="max-height:95dvh">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">📬 Nouvelle commande</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-commande');document.getElementById('modal-commande').remove()">✕</button></div>
+<div class="sheet-body">
+<div class="field"><label>Fournisseur (optionnel)</label><input type="text" id="cmd-fournisseur" placeholder="ex: Grossiste ABC"/></div>
+<div class="field"><label>Date commande</label><input type="date" id="cmd-date" value="${today()}"/></div>
+${lignesHTML}
+<div class="field"><label>Note (optionnel)</label><input type="text" id="cmd-note" placeholder="ex: Livraison sous 3 jours"/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-commande');document.getElementById('modal-commande').remove()">Annuler</button>
+<button class="btn btn-amber" style="flex:2" onclick="saveCommande()">📬 Commander → Débiter caisse</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+addCmdLigne();
+}
+window.openAddCommande=openAddCommande;
+
+let cmdLigneCount=0;
+function addCmdLigne(){
+cmdLigneCount++;
+const id="ligne-"+cmdLigneCount;
+const prodOptions='<option value="">— Choisir produit —</option>'+getProducts().map(p=>`<option value="${p.id}" data-nom="${p.name}" data-prix="${p.costPrice}">${p.name} (stock: ${p.stock})</option>`).join("")+'<option value="__nouveau__">➕ Nouveau produit</option>';
+const div=document.createElement("div");
+div.id=id;
+div.style.cssText="background:var(--bg);border-radius:10px;padding:10px;border:1px solid var(--border)";
+div.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+<span style="font-size:11px;font-weight:700;color:var(--muted)">Produit ${cmdLigneCount}</span>
+<button onclick="document.getElementById('${id}').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px">✕</button>
+</div>
+<div class="field" style="margin-bottom:8px">
+<select class="cmd-produit-select" onchange="onCmdProduitChange(this,'${id}')">
+${prodOptions}
+</select>
+</div>
+<div id="${id}-nom-field" style="display:none" class="field" style="margin-bottom:8px">
+<label>Nom du nouveau produit</label>
+<input type="text" class="cmd-nouveau-nom" placeholder="ex: Puff XL 5000"/>
+</div>
+<div class="grid2" style="gap:8px">
+<div class="field"><label>Quantité</label><input type="number" class="cmd-qty" min="1" placeholder="0"/></div>
+<div class="field"><label>Prix de revient/u (F)</label><input type="number" class="cmd-prix" min="0" placeholder="0"/></div>
+</div>`;
+document.getElementById("cmd-lignes").appendChild(div);
+}
+window.addCmdLigne=addCmdLigne;
+
+function onCmdProduitChange(select,ligneId){
+const prix=select.options[select.selectedIndex]?.dataset?.prix||"";
+const ligneEl=document.getElementById(ligneId);
+if(!ligneEl)return;
+ligneEl.querySelector(".cmd-prix").value=prix;
+const nomField=document.getElementById(ligneId+"-nom-field");
+if(nomField)nomField.style.display=select.value==="__nouveau__"?"block":"none";
+}
+window.onCmdProduitChange=onCmdProduitChange;
+
+async function saveCommande(){
+const fournisseur=document.getElementById("cmd-fournisseur").value.trim();
+const date=document.getElementById("cmd-date").value;
+const note=document.getElementById("cmd-note").value.trim();
+const lignesEls=document.getElementById("cmd-lignes").children;
+const lignes=[];
+let total=0;
+for(const el of lignesEls){
+  const select=el.querySelector(".cmd-produit-select");
+  const qtyEl=el.querySelector(".cmd-qty");
+  const prixEl=el.querySelector(".cmd-prix");
+  const nomEl=el.querySelector(".cmd-nouveau-nom");
+  if(!select||!qtyEl||!prixEl)continue;
+  const qty=+qtyEl.value;
+  const prix=+prixEl.value;
+  if(!qty||!prix)continue;
+  let produitId=select.value;
+  let produitNom="";
+  if(produitId==="__nouveau__"){
+    produitNom=nomEl?.value.trim()||"Nouveau produit";
+    produitId=null;
+  }else{
+    const p=getP(produitId);
+    produitNom=p?p.name:select.options[select.selectedIndex]?.text||"?";
+  }
+  lignes.push({produitId:produitId||null,produit:produitNom,qty,prixRevient:prix});
+  total+=qty*prix;
+}
+if(!lignes.length)return alert("Ajoute au moins un produit !");
+if(!confirm(`Commander pour ${cfa(total)} ?
+Ce montant sera débité de la caisse.`))return;
+
+const k=push(ref(db,"commandes")).key;
+await set(ref(db,"commandes/"+k),{_key:k,fournisseur,date,note,lignes,totalMontant:total,status:"en_attente"});
+
+// Enregistrer comme sortie de caisse
+const ak=push(ref(db,"caisseConfig/apports")).key;
+await set(ref(db,"caisseConfig/apports/"+ak),{_key:ak,montant:-total,date,note:"📬 Commande: "+(fournisseur||"Fournisseur")});
+
+closeModal("modal-commande");
+document.getElementById("modal-commande")?.remove();
+alert("✅ Commande enregistrée !\n💸 "+cfa(total)+" débités de la caisse.");
+render();
+}
+window.saveCommande=saveCommande;
+
+function confirmerReception(key){
+const c=getCommandes().find(c=>c._key===key);if(!c)return;
+// Show transport form
+const html=`<div class="overlay" id="modal-reception" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">📦 Confirmer réception</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-reception');document.getElementById('modal-reception').remove()">✕</button></div>
+<div class="sheet-body">
+<div style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:12px">
+<div style="font-weight:800;font-size:13px;margin-bottom:8px">${c.fournisseur||"Commande"}</div>
+${(c.lignes||[]).map(l=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">
+<span>${l.produit} × ${l.qty}</span><span style="font-family:monospace">${cfa(l.prixRevient*l.qty)}</span>
+</div>`).join("")}
+<div style="display:flex;justify-content:space-between;font-size:13px;font-weight:800;padding:8px 0 0">
+<span>Total payé fournisseur</span><span style="font-family:monospace;color:var(--amber)">${cfa(+c.totalMontant||0)}</span>
+</div>
+</div>
+<div class="field">
+<label>🚚 Frais de transport (F CFA)</label>
+<input type="number" id="rec-transport" placeholder="0 si pas de transport" min="0"/>
+</div>
+<div style="background:#3b82f614;border:1px solid #3b82f630;border-radius:9px;padding:9px 12px;font-size:11px;color:var(--blue)">
+💡 Le transport sera réparti sur le prix de revient de chaque produit et débité de la caisse.
+</div>
+<div class="field"><label>Date réception</label><input type="date" id="rec-date" value="${today()}"/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-reception');document.getElementById('modal-reception').remove()">Annuler</button>
+<button class="btn btn-green" style="flex:2" onclick="validerReception('${key}')">✅ Confirmer & Ajouter au stock</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.confirmerReception=confirmerReception;
+
+async function validerReception(key){
+const c=getCommandes().find(c=>c._key===key);if(!c)return;
+const transport=+document.getElementById("rec-transport").value||0;
+const dateRec=document.getElementById("rec-date").value||today();
+
+const totalFournisseur=+c.totalMontant||0;
+const totalQty=(c.lignes||[]).reduce((a,l)=>a+(+l.qty||0),0);
+const transportParUnite=totalQty>0?transport/totalQty:0;
+
+// Ajouter au stock avec prix de revient ajusté (fournisseur + transport)
+for(const l of (c.lignes||[])){
+  const prixRevientAjuste=Math.round(l.prixRevient+transportParUnite);
+  if(l.produitId){
+    const p=getP(l.produitId);
+    if(p){
+      // Recalculer prix de revient moyen si stock existant
+      const ancienTotal=p.stock*p.costPrice;
+      const nouveauTotal=l.qty*prixRevientAjuste;
+      const nouveauPrix=Math.round((ancienTotal+nouveauTotal)/(p.stock+l.qty));
+      await fbSetProduct({...p,stock:p.stock+l.qty,costPrice:nouveauPrix});
+      await fbAddMove({productId:p.id,productName:p.name,type:"in",qty:l.qty,date:dateRec,note:"Réception: "+(c.fournisseur||"Fournisseur")});
+    }
+  }else{
+    const newId=Date.now()+Math.random();
+    await fbSetProduct({id:newId,name:l.produit,category:"Autre",costPrice:prixRevientAjuste,stock:l.qty});
+    await fbAddMove({productId:newId,productName:l.produit,type:"in",qty:l.qty,date:dateRec,note:"Réception: "+(c.fournisseur||"Fournisseur")});
+  }
+}
+
+// Débiter transport de la caisse
+if(transport>0){
+  const tk=push(ref(db,"caisseConfig/apports")).key;
+  await set(ref(db,"caisseConfig/apports/"+tk),{_key:tk,montant:-transport,date:dateRec,note:"🚚 Transport commande: "+(c.fournisseur||"Fournisseur")});
+}
+
+await set(ref(db,"commandes/"+key),{...c,status:"reçue",dateReception:dateRec,fraisTransport:transport,prixRevientFinal:Math.round((totalFournisseur+transport)/Math.max(totalQty,1))});
+
+closeModal("modal-reception");
+document.getElementById("modal-reception")?.remove();
+
+let msg="✅ Réception confirmée ! | 📦 Stock mis à jour | ";
+if(transport>0)msg+="🚚 Transport: "+cfa(transport)+" débité de la caisse";
+alert(msg);
+render();
+}
+window.validerReception=validerReception;
+
+async function saveApport(){
+const montant=+document.getElementById("ap-montant").value;
+const date=document.getElementById("ap-date").value;
+const note=document.getElementById("ap-note").value.trim()||"Apport manuel";
+if(!montant||montant<=0)return alert("Montant invalide !");
+const k=push(ref(db,"caisseConfig/apports")).key;
+await set(ref(db,"caisseConfig/apports/"+k),{_key:k,montant,date,note});
+closeModal("modal-apport");
+document.getElementById("modal-apport")?.remove();
+alert("✅ Apport de "+cfa(montant)+" enregistré !");
+render();
+}
+window.saveApport=saveApport;
 
 function toggleMoreMenu(){
 const m=document.getElementById("more-menu");
@@ -1531,10 +1908,14 @@ ${!solde?`<div style="display:flex;gap:6px">
 <button class="btn btn-green btn-sm" style="flex:2" onclick="openRemboursement('${c._key}')">💰 Remboursement</button>
 <button class="btn btn-ghost btn-sm" style="flex:1" onclick="deleteCredit('${c._key}')">✕</button>
 </div>`:`<button class="btn btn-ghost btn-sm btn-full" onclick="deleteCredit('${c._key}')">Supprimer</button>`}
-${(c.remboursements||[]).length?`<div style="margin-top:10px">
-<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">Historique remboursements</div>
+${((c.historique||[]).length||(c.remboursements||[]).length)?`<div style="margin-top:10px">
+<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">📋 Historique</div>
+${(c.historique||[]).map(h=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
+<div><span style="color:var(--muted)">${h.date}</span><div style="font-size:10px;color:var(--muted)">${h.note||""}</div></div>
+<span style="font-family:monospace;color:var(--red)">+${cfa(h.montant)}</span>
+</div>`).join("")}
 ${(c.remboursements||[]).map(r=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
-<span>${r.date}</span><span style="font-family:monospace;color:var(--green)">+${cfa(r.montant)}</span>
+<span style="color:var(--muted)">${r.date} · Remb.</span><span style="font-family:monospace;color:var(--green)">-${cfa(r.montant)}</span>
 </div>`).join("")}
 </div>`:""}
 </div>`;
@@ -1646,6 +2027,7 @@ if(currentTab==="depots"){renderDepots();return;}
 if(currentTab==="depenses"){renderDepenses();return;}
 if(currentTab==="caisse"){renderCaisse();return;}
 if(currentTab==="credits"){renderCredits();return;}
+if(currentTab==="commandes"){renderCommandes();return;}
 const el=document.getElementById("content");
 const mk=nowMK();const d=new Date();
 const currentLabel=`${MONTHS_FULL[d.getMonth()]} ${d.getFullYear()}`;
