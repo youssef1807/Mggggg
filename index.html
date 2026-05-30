@@ -766,14 +766,19 @@ alert("❌ "+errMsg);
 return;
 }
 const data=await resp.json();
-const text=(data.candidates?.[0]?.content?.parts||[]).map(p=>p.text||"").join("").trim();
+const parts=data.candidates?.[0]?.content?.parts||[];
+let text=parts.map(p=>p.text||"").join("").trim();
 if(!text){alert("❌ Gemini n'a pas retourné de réponse. Réessaie.");return;}
-const clean=text.replace(/```json[\s\S]*?```|```[\s\S]*?```/g,m=>m.replace(/```json|```/g,"")).trim();
+// Remove markdown fences
+let clean=text.replace(/```json/g,"").replace(/```/g,"").trim();
+// Extract first JSON object
+const jmatch=clean.match(/\{[\s\S]*\}/);
+if(jmatch)clean=jmatch[0];
 let parsed;
 try{parsed=JSON.parse(clean);}
 catch(e){
-const match=clean.match(/\{[\s\S]*\}/);
-if(match){try{parsed=JSON.parse(match[0]);}catch{}}
+// Try fixing trailing commas
+try{parsed=JSON.parse(clean.replace(/,\s*([}\]])/g,"$1"));}catch{}
 if(!parsed){alert("❌ L'IA n'a pas pu analyser la photo. Assure-toi que le cahier est bien visible et réessaie.");return;}
 }
 if(parsed.ventes&&parsed.ventes.length>0){
