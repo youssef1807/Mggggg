@@ -812,8 +812,8 @@ if(lignesDepot.length>0){
   let depotMsg="";
   for(const v of lignesDepot){
     const nomDepot=(v.depotNom||"").trim().toLowerCase();
-    // Trouver le dépôt correspondant (recherche approximative)
-    const depot=getDepots().find(d=>d.status==="open"&&(
+    // Trouver le dépôt correspondant (recherche approximative, actif ou terminé)
+    const depot=getDepots().find(d=>(
       d.lieu.toLowerCase().includes(nomDepot)||
       nomDepot.includes(d.lieu.toLowerCase())||
       d.lieu.toLowerCase()===nomDepot
@@ -825,8 +825,9 @@ if(lignesDepot.length>0){
         // Déduire du stock principal et ajouter au dépôt
         await fbSetProduct({...p,stock:p.stock-qty});
         await fbAddMove({productId:p.id,productName:p.name,type:"out",qty,date:today(),note:"Réappro dépôt: "+depot.lieu});
-        const newQtyDeposited=depot.qtyDeposited+qty;
-        await set(ref(db,`depots/${depot._key}`),{...depot,qtyDeposited:newQtyDeposited});
+        const newQtyDeposited=(+depot.qtyDeposited||0)+qty;
+        // Rouvrir le dépôt si terminé
+        await set(ref(db,`depots/${depot._key}`),{...depot,qtyDeposited:newQtyDeposited,status:"open"});
         depotMsg+=`✅ +${qty} unités ajoutées au dépôt "${depot.lieu}"\n`;
       }else if(!p){
         depotMsg+=`⚠️ Produit introuvable pour dépôt "${v.depotNom}"\n`;
@@ -1067,12 +1068,16 @@ ${closed.length?`<div style="font-size:10px;font-weight:700;color:var(--muted);t
 }
 
 function depotCardHtml(d){
-const qtyDispo=d.qtyDeposited-d.qtySold-d.qtyReturned;
-const progress=Math.round((d.qtySold/d.qtyDeposited)*100);
-const totalVerse=(d.versements||[]).reduce((a,v)=>a+v.montant,0);
+const qtyDep=+d.qtyDeposited||0;
+const qtySold=+d.qtySold||0;
+const qtyRet=+d.qtyReturned||0;
+const qtyDispo=qtyDep-qtySold-qtyRet;
+const progress=qtyDep>0?Math.round((qtySold/qtyDep)*100):0;
+const totalVerse=(d.versements||[]).reduce((a,v)=>a+(+v.montant||0),0);
+const dateStr=d.dateDepot||"—";
 return`<div class="depot-card ${d.status==="open"?"depot-card-open":"depot-card-closed"}" onclick="openRetourDepot('${d._key}')">
-<div class="depot-head"><div><div class="depot-lieu">${d.lieu}</div><div style="font-size:11px;color:var(--muted);margin-top:2px">${d.productName} · Déposé le ${d.dateDepot}</div></div>${tag(d.status==="open"?"🟡 Actif":"✅ Terminé",d.status==="open"?"amber":"green")}</div>
-<div class="depot-progress"><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)"><span>${d.qtySold}/${d.qtyDeposited} vendus</span><span>${qtyDispo} restants</span></div><div class="depot-progress-bar"><div class="depot-progress-fill" style="width:${progress}%"></div></div></div>
+<div class="depot-head"><div><div class="depot-lieu">${d.lieu||"?"}</div><div style="font-size:11px;color:var(--muted);margin-top:2px">${d.productName||"?"} · Déposé le ${dateStr}</div></div>${tag(d.status==="open"?"🟡 Actif":"✅ Terminé",d.status==="open"?"amber":"green")}</div>
+<div class="depot-progress"><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)"><span>${qtySold}/${qtyDep} vendus</span><span>${qtyDispo} restants</span></div><div class="depot-progress-bar"><div class="depot-progress-fill" style="width:${progress}%"></div></div></div>
 <div class="grid2" style="gap:6px"><div class="prod-cell"><div class="prod-cell-lbl">Versé total</div><div class="prod-cell-val" style="color:var(--green)">${cfa(totalVerse)}</div></div><div class="prod-cell"><div class="prod-cell-lbl">Prix estimé/u</div><div class="prod-cell-val">${d.prixEstime?cfa(d.prixEstime):"—"}</div></div></div>
 </div>`;
 }
