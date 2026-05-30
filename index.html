@@ -981,7 +981,13 @@ document.getElementById("mrd2-body").innerHTML=`
 <button class="btn btn-amber btn-sm" style="flex:1" onclick="showDepotAction('${key}','retour')">↩ Retour stock</button>
 </div>
 <div id="depot-action-form"></div>
-${(d.versements&&d.versements.length)?`<div style="font-weight:800;font-size:11px;color:var(--muted);margin:10px 0 6px;text-transform:uppercase">Historique versements</div>${d.versements.map(v=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px"><span>${v.date} · ${v.qtySold} vendus</span><span style="font-family:monospace;color:var(--green)">+${cfa(v.montant)}</span></div>`).join("")}`:""}`;
+${(d.versements&&d.versements.length)?`<div style="font-weight:800;font-size:11px;color:var(--muted);margin:10px 0 6px;text-transform:uppercase">Historique versements</div>${d.versements.map((v,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px">
+<div><div style="font-weight:700">${v.date} · ${v.qtySold} vendus</div><div style="font-family:monospace;color:var(--green);font-size:13px">+${cfa(v.montant)}</div></div>
+<div style="display:flex;gap:6px">
+<button class="btn btn-ghost btn-sm" style="padding:4px 8px;font-size:11px" onclick="editVersement('${d._key}',${i})">✎</button>
+<button class="btn btn-red btn-sm" style="padding:4px 8px;font-size:11px" onclick="deleteVersement('${d._key}',${i})">✕</button>
+</div>
+</div>`).join("")}`:""}`;
 document.getElementById("mrd2-footer").innerHTML=`<button class="btn btn-ghost btn-full" onclick="closeModal('modal-retour-depot')">Fermer</button>`;
 openModal("modal-retour-depot");
 }
@@ -1041,6 +1047,38 @@ closeModal("modal-retour-depot");
 alert("✅ Stock récupéré !");
 }
 window.saveRetourDepot=saveRetourDepot;
+
+function editVersement(key,idx){
+const d=getDepots().find(d=>d._key===key);if(!d)return;
+const v=d.versements[idx];if(!v)return;
+const newDate=prompt("Date (AAAA-MM-JJ):",v.date)||v.date;
+const newQty=+prompt("Quantite vendue:",v.qtySold)||v.qtySold;
+const newMontant=+prompt("Montant recu (F):",v.montant);
+if(!newMontant)return;
+const oldQty=+v.qtySold||0;
+const diffQty=newQty-oldQty;
+const versements=[...d.versements];
+versements[idx]={...v,date:newDate,qtySold:newQty,montant:newMontant};
+const newQtySold=Math.max(0,(+d.qtySold||0)+diffQty);
+const newStatus=((+d.qtyDeposited||0)-newQtySold-(+d.qtyReturned||0))<=0?"closed":"open";
+set(ref(db,"depots/"+key),{...d,qtySold:newQtySold,versements,status:newStatus})
+.then(()=>{alert("Versement modifie !");openRetourDepot(key);})
+.catch(e=>alert("Erreur: "+e.message));
+}
+window.editVersement=editVersement;
+
+async function deleteVersement(key,idx){
+const d=getDepots().find(d=>d._key===key);if(!d)return;
+const v=d.versements[idx];if(!v)return;
+if(!confirm("Supprimer ce versement ?"))return;
+const versements=d.versements.filter((_,i)=>i!==idx);
+const newQtySold=Math.max(0,(+d.qtySold||0)-(+v.qtySold||0));
+const newStatus=((+d.qtyDeposited||0)-newQtySold-(+d.qtyReturned||0))<=0?"closed":"open";
+await set(ref(db,"depots/"+key),{...d,qtySold:newQtySold,versements,status:newStatus});
+alert("Versement supprime !");
+openRetourDepot(key);
+}
+window.deleteVersement=deleteVersement;
 
 function renderDepots(){
 const el=document.getElementById("content");if(!el)return;
