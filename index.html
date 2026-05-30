@@ -221,17 +221,23 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Syne',
 </div>
 <div class="sync-banner" id="sync-banner"><div class="sync-dot"></div><span id="sync-text">Synchronisation...</span></div>
 <div class="content" id="content"></div>
-<nav class="nav">
+<nav class="nav" id="main-nav">
 <button class="nav-btn active" id="nav-rapport" onclick="goTab('rapport')"><span class="ico">📋</span><span class="lbl">Rapport</span></button>
 <button class="nav-btn" id="nav-dashboard" onclick="goTab('dashboard')" style="display:none"><span class="ico">📊</span><span class="lbl">Dashboard</span></button>
 <button class="nav-btn" id="nav-depots" onclick="goTab('depots')"><span class="ico">🏪</span><span class="lbl">Dépôts</span></button>
-<button class="nav-btn" id="nav-produits" onclick="goTab('produits')" style="display:none"><span class="ico">📦</span><span class="lbl">Produits</span></button>
-<button class="nav-btn" id="nav-stats" onclick="goTab('stats')" style="display:none"><span class="ico">📈</span><span class="lbl">Stats</span></button>
-<button class="nav-btn" id="nav-depenses" onclick="goTab('depenses')" style="display:none"><span class="ico">💸</span><span class="lbl">Dépenses</span></button>
-<button class="nav-btn" id="nav-caisse" onclick="goTab('caisse')" style="display:none"><span class="ico">🏦</span><span class="lbl">Caisse</span></button>
 <button class="nav-btn" id="nav-credits" onclick="goTab('credits')"><span class="ico">🤝</span><span class="lbl">Crédits</span></button>
-<button class="nav-btn" id="nav-historique" onclick="goTab('historique')"><span class="ico">🗂</span><span class="lbl">Histo</span></button>
+<button class="nav-btn" id="nav-caisse" onclick="goTab('caisse')" style="display:none"><span class="ico">🏦</span><span class="lbl">Caisse</span></button>
+<button class="nav-btn" id="nav-more" onclick="toggleMoreMenu()"><span class="ico">⋯</span><span class="lbl">Plus</span></button>
 </nav>
+<!-- MORE MENU -->
+<div id="more-menu" style="display:none;position:fixed;bottom:calc(56px + env(safe-area-inset-bottom));left:0;right:0;background:var(--bg2);border-top:1px solid var(--border);z-index:50;padding:8px 0">
+<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:4px;padding:4px 8px">
+<button class="nav-btn" id="nav-produits" onclick="goTab('produits');closeMoreMenu()" style="display:none;min-width:70px"><span class="ico">📦</span><span class="lbl">Produits</span></button>
+<button class="nav-btn" id="nav-stats" onclick="goTab('stats');closeMoreMenu()" style="display:none;min-width:70px"><span class="ico">📈</span><span class="lbl">Stats</span></button>
+<button class="nav-btn" id="nav-depenses" onclick="goTab('depenses');closeMoreMenu()" style="display:none;min-width:70px"><span class="ico">💸</span><span class="lbl">Dépenses</span></button>
+<button class="nav-btn" id="nav-historique" onclick="goTab('historique');closeMoreMenu()" style="min-width:70px"><span class="ico">🗂</span><span class="lbl">Histo</span></button>
+</div>
+</div>
 </div>
 <!-- SCAN OVERLAY -->
 <div class="scan-overlay" id="scan-overlay" style="display:none">
@@ -491,6 +497,13 @@ return Promise.all(toDelete.map(m=>remove(ref(db,`moves/${m._key}`))));
 }
 
 document.addEventListener("visibilitychange",()=>{if(document.hidden&&role)logout();});
+document.addEventListener("click",function(e){
+const menu=document.getElementById("more-menu");
+const btn=document.getElementById("nav-more");
+if(menu&&btn&&!menu.contains(e.target)&&!btn.contains(e.target)){
+menu.style.display="none";
+}
+});
 
 function selectRole(r){
 selectedLoginRole=r;
@@ -1467,6 +1480,18 @@ await set(ref(db,"caisseConfig/soldeDepart"),montant);
 render();
 }
 window.setSoldeDepart=setSoldeDepart;
+
+function toggleMoreMenu(){
+const m=document.getElementById("more-menu");
+if(m)m.style.display=m.style.display==="none"?"block":"none";
+}
+window.toggleMoreMenu=toggleMoreMenu;
+
+function closeMoreMenu(){
+const m=document.getElementById("more-menu");
+if(m)m.style.display="none";
+}
+window.closeMoreMenu=closeMoreMenu;
 
 // ── CREDITS RENDER ─────────────────────────────────────────────────────────────
 function renderCredits(){
