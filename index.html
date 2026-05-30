@@ -1173,8 +1173,7 @@ const newQtyReturned=(+d.qtyReturned||0)+qty;
 const newStatus=((+d.qtyDeposited||0)-(+d.qtySold||0)-newQtyReturned)<=0?"closed":d.status;
 await set(ref(db,`depots/${key}`),{...d,qtyReturned:newQtyReturned,status:newStatus});
 closeModal("modal-retour-depot");
-alert("✅ Retour enregistré !
-📦 Pense à ajouter le stock manuellement via le bouton + Stock.");
+alert("✅ Retour enregistré !\n📦 Pense à ajouter le stock manuellement via le bouton + Stock.");
 }
 window.saveRetourDepot=saveRetourDepot;
 
@@ -1613,8 +1612,7 @@ const newStatus=newRestant<=0?"soldé":"en cours";
 await set(ref(db,"credits/"+key),{...c,montantRestant:Math.max(0,newRestant),remboursements,status:newStatus});
 closeModal("modal-remb");
 document.getElementById("modal-remb")?.remove();
-alert("✅ Remboursement enregistré !
-💡 Ce montant apparaît dans la Caisse.");
+alert("✅ Remboursement enregistré !\n💡 Ce montant apparaît dans la Caisse.");
 render();
 }
 window.saveRemboursement=saveRemboursement;
