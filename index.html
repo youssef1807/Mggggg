@@ -730,22 +730,32 @@ const status=document.getElementById("scan-status");
 overlay.style.display="flex";
 status.textContent="🤖 Gemini analyse votre cahier...";
 const productList=getProducts().map(p=>`- "${p.name}" (id:${p.id}, revient:${p.costPrice}F, stock:${p.stock})`).join("\n");
+const depotList=getDepots().filter(d=>d.status==="open").map(d=>`- "${d.lieu}" (produit: ${d.productName})`).join("\n")||"Aucun dépôt actif";
 const prompt=`Tu es un assistant expert en lecture de rapports de vente manuscrits pour une boutique de vape.
 
 Produits disponibles dans la boutique:
 ${productList}
 
-Regarde attentivement cette photo et extrait TOUTES les ventes visibles.
-Pour chaque vente identifiée, retourne:
+Dépôts-vente actifs:
+${depotList}
+
+Regarde attentivement cette photo. Elle peut contenir soit des ventes normales, soit un réapprovisionnement de dépôt-vente.
+
+Si tu détectes un nom de lieu/dépôt dans la photo (ex: "Stand Marché", "Kiosque Centre", etc.), c'est un réapprovisionnement de dépôt.
+Si c'est un réapprovisionnement de dépôt, mettre "depot" dans le champ type et le nom du dépôt dans "depotNom".
+Sinon, c'est une vente normale: type = "gros" UNIQUEMENT si "gros" ou "grossiste" est écrit, sinon "detail".
+
+Pour chaque ligne identifiée, retourne:
 - productId: l'id du produit (entier)
 - productName: le nom du produit
-- qty: quantité vendue (entier, minimum 1)
-- price: prix unitaire en F CFA (mettre 0 si c'est un cadeau/offert)
-- type: "gros" si vente en gros, "detail" si vente au détail/unitaire
+- qty: quantité (entier, minimum 1)
+- price: prix unitaire en F CFA (0 si cadeau)
+- type: "depot" si réapprovisionnement dépôt, "gros" si vente en gros explicite, "detail" sinon
+- depotNom: nom du dépôt si type="depot", sinon ""
 - isGift: true si cadeau, false sinon
 
 Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans backticks, sans explication:
-{"ventes":[{"productId":1,"productName":"Elf Bar 600","qty":2,"price":3500,"type":"detail","isGift":false}],"notes":""}`;
+{"ventes":[{"productId":1,"productName":"Elf Bar 600","qty":10,"price":3500,"type":"depot","depotNom":"Stand Marché","isGift":false}],"notes":""}`;
 try{
 const resp=await fetch(GEMINI_URL,{
 method:"POST",
@@ -793,7 +803,46 @@ try{parsed=JSON.parse(clean.replace(/,\s*([}\]])/g,"$1"));}catch{}
 if(!parsed){alert("❌ JSON invalide. Réponse IA: "+text.slice(0,200));return;}
 }
 if(parsed.ventes&&parsed.ventes.length>0){
-currentRapport.ventes=parsed.ventes.map(v=>({
+// Séparer les lignes dépôt des ventes normales
+const lignesDepot=parsed.ventes.filter(v=>v.type==="depot");
+const lignesVente=parsed.ventes.filter(v=>v.type!=="depot");
+
+// Traiter les réapprovisionnements de dépôt
+if(lignesDepot.length>0){
+  let depotMsg="";
+  for(const v of lignesDepot){
+    const nomDepot=(v.depotNom||"").trim().toLowerCase();
+    // Trouver le dépôt correspondant (recherche approximative)
+    const depot=getDepots().find(d=>d.status==="open"&&(
+      d.lieu.toLowerCase().includes(nomDepot)||
+      nomDepot.includes(d.lieu.toLowerCase())||
+      d.lieu.toLowerCase()===nomDepot
+    ));
+    if(depot){
+      const qty=Math.max(1,+v.qty||1);
+      const p=getP(depot.productId);
+      if(p&&qty<=p.stock){
+        // Déduire du stock principal et ajouter au dépôt
+        await fbSetProduct({...p,stock:p.stock-qty});
+        await fbAddMove({productId:p.id,productName:p.name,type:"out",qty,date:today(),note:"Réappro dépôt: "+depot.lieu});
+        const newQtyDeposited=depot.qtyDeposited+qty;
+        await set(ref(db,`depots/${depot._key}`),{...depot,qtyDeposited:newQtyDeposited});
+        depotMsg+=`✅ +${qty} unités ajoutées au dépôt "${depot.lieu}"\n`;
+      }else if(!p){
+        depotMsg+=`⚠️ Produit introuvable pour dépôt "${v.depotNom}"\n`;
+      }else{
+        depotMsg+=`⚠️ Stock insuffisant pour réappro "${depot.lieu}" (stock: ${p.stock})\n`;
+      }
+    }else{
+      depotMsg+=`⚠️ Dépôt introuvable: "${v.depotNom}"\n`;
+    }
+  }
+  if(depotMsg)alert("📦 Réapprovisionnement dépôt:\n"+depotMsg);
+}
+
+// Traiter les ventes normales
+if(lignesVente.length>0){
+currentRapport.ventes=lignesVente.map(v=>({
 id:Date.now()+Math.random(),
 productId:String(v.productId),
 productName:v.productName||getP(v.productId)?.name||"",
@@ -806,6 +855,14 @@ rapportMode="manual";
 if(parsed.notes&&parsed.notes.trim())alert("📝 Note IA: "+parsed.notes);
 render();
 setTimeout(()=>currentRapport.ventes.forEach(v=>refreshPreview(v.id)),150);
+}else if(lignesDepot.length===0){
+alert("⚠️ Aucune vente détectée sur la photo.\nVérifie que le cahier est bien lisible et bien éclairé, puis réessaie.");
+rapportMode="manual";
+render();
+}else{
+// Seulement des dépôts, pas de ventes normales
+render();
+}
 }else{
 alert("⚠️ Aucune vente détectée sur la photo.\nVérifie que le cahier est bien lisible et bien éclairé, puis réessaie.");
 rapportMode="manual";
