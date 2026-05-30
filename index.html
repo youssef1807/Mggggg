@@ -967,7 +967,7 @@ window.createDepot=createDepot;
 
 function openRetourDepot(key){
 const d=getDepots().find(d=>d._key===key);if(!d)return;
-const qtyDispo=d.qtyDeposited-d.qtySold-d.qtyReturned;
+const qtyDispo=Math.max(0,(+d.qtyDeposited||0)-(+d.qtySold||0)-(+d.qtyReturned||0));
 document.getElementById("mrd2-title").textContent="🏪 "+d.lieu;
 document.getElementById("mrd2-body").innerHTML=`
 <div style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:12px">
@@ -1006,14 +1006,20 @@ window.openRetourDepot=openRetourDepot;
 
 function showDepotAction(key,type){
 const d=getDepots().find(d=>d._key===key);if(!d)return;
-const qtyDispo=d.qtyDeposited-d.qtySold-d.qtyReturned;
+const qtyDispo=Math.max(0,(+d.qtyDeposited||0)-(+d.qtySold||0)-(+d.qtyReturned||0));
 const el=document.getElementById("depot-action-form");
 if(type==="versement"){
+const prixU=+d.prixEstime||0;
 el.innerHTML=`<div style="font-weight:800;font-size:12px;margin-bottom:10px">💰 Enregistrer un versement</div>
-<div class="grid2" style="gap:8px;margin-bottom:8px">
-<div class="field"><label>Qté vendue</label><input type="number" id="dv-qty" min="1" max="${qtyDispo}" placeholder="0"/></div>
-<div class="field"><label>Montant reçu (F)</label><input type="number" id="dv-montant" placeholder="0"/></div>
+<div class="field" style="margin-bottom:8px">
+<label>Montant reçu (F)</label>
+<input type="number" id="dv-montant" placeholder="ex: 45000" oninput="calcQtyFromMontant('${key}',this.value)"/>
 </div>
+<div style="background:var(--bg);border-radius:9px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+<span style="font-size:11px;color:var(--muted)">Qté vendue estimée</span>
+<span id="dv-qty-preview" style="font-family:monospace;font-weight:800;font-size:15px;color:var(--blue)">${prixU?"—":"Prix/u non défini"}</span>
+</div>
+<input type="hidden" id="dv-qty" value="0"/>
 <div class="field" style="margin-bottom:10px"><label>Date</label><input type="date" id="dv-date" value="${today()}"/></div>
 <button class="btn btn-green btn-full" onclick="saveVersement('${key}')">✅ Enregistrer</button>`;
 }else{
@@ -1024,14 +1030,30 @@ el.innerHTML=`<div style="font-weight:800;font-size:12px;margin-bottom:10px">↩
 }
 window.showDepotAction=showDepotAction;
 
+function calcQtyFromMontant(key,montantStr){
+const d=getDepots().find(d=>d._key===key);if(!d)return;
+const montant=+montantStr||0;
+const prixU=+d.prixEstime||0;
+const preview=document.getElementById("dv-qty-preview");
+const qtyInput=document.getElementById("dv-qty");
+if(!prixU||!montant){if(preview)preview.textContent="—";return;}
+const qty=Math.round(montant/prixU);
+if(preview)preview.textContent=qty+" unités";
+if(qtyInput)qtyInput.value=qty;
+}
+window.calcQtyFromMontant=calcQtyFromMontant;
+
 async function saveVersement(key){
 const d=getDepots().find(d=>d._key===key);if(!d)return;
-const qty=+document.getElementById("dv-qty").value;
 const montant=+document.getElementById("dv-montant").value;
 const date=document.getElementById("dv-date").value;
-const qtyDispo=d.qtyDeposited-d.qtySold-d.qtyReturned;
-if(!qty||qty>qtyDispo)return alert(`Quantité invalide (max: ${qtyDispo})`);
 if(!montant)return alert("Montant obligatoire");
+const prixU=+d.prixEstime||0;
+const qtyDispo=Math.max(0,(+d.qtyDeposited||0)-(+d.qtySold||0)-(+d.qtyReturned||0));
+// Calcul qty: si prix connu, diviser montant par prix, sinon demander
+let qty=prixU?Math.round(montant/prixU):+document.getElementById("dv-qty").value;
+if(!qty||qty<=0){qty=+prompt("Quantité vendue :",1)||1;}
+if(qty>qtyDispo)return alert("Quantité depasse le stock restant (max: "+qtyDispo+")");
 const versements=[...(d.versements||[]),{date,qtySold:qty,montant}];
 const newQtySold=d.qtySold+qty;
 const newStatus=(d.qtyDeposited-newQtySold-d.qtyReturned)<=0?"closed":d.status;
@@ -1045,7 +1067,7 @@ window.saveVersement=saveVersement;
 async function saveRetourDepot(key){
 const d=getDepots().find(d=>d._key===key);if(!d)return;
 const qty=+document.getElementById("dr-qty").value;
-const qtyDispo=d.qtyDeposited-d.qtySold-d.qtyReturned;
+const qtyDispo=Math.max(0,(+d.qtyDeposited||0)-(+d.qtySold||0)-(+d.qtyReturned||0));
 if(!qty||qty>qtyDispo)return alert(`Quantité invalide (max: ${qtyDispo})`);
 if(!confirm(`Récupérer ${qty} unités en stock ?`))return;
 const p=getP(d.productId);
