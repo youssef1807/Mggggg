@@ -766,20 +766,31 @@ alert("❌ "+errMsg);
 return;
 }
 const data=await resp.json();
-const parts=data.candidates?.[0]?.content?.parts||[];
-let text=parts.map(p=>p.text||"").join("").trim();
-if(!text){alert("❌ Gemini n'a pas retourné de réponse. Réessaie.");return;}
-// Remove markdown fences
-let clean=text.replace(/```json/g,"").replace(/```/g,"").trim();
-// Extract first JSON object
+// Extract text from all possible response structures
+let text="";
+try{
+  const cand=data.candidates?.[0];
+  const parts=cand?.content?.parts||[];
+  text=parts.map(p=>p.text||"").join("").trim();
+  // gemini-2.5 sometimes uses finishReason with empty parts - check output
+  if(!text&&cand?.content?.text)text=cand.content.text.trim();
+}catch(ex){console.warn("extract err",ex);}
+console.log("Gemini raw:",JSON.stringify(data).slice(0,500));
+if(!text){
+  // Show raw response to debug
+  const raw=JSON.stringify(data).slice(0,300);
+  alert("❌ Réponse vide de Gemini. Debug: "+raw);
+  return;
+}
+// Clean and parse JSON
+let clean=text.replace(/```json/gi,"").replace(/```/g,"").trim();
 const jmatch=clean.match(/\{[\s\S]*\}/);
 if(jmatch)clean=jmatch[0];
 let parsed;
 try{parsed=JSON.parse(clean);}
 catch(e){
-// Try fixing trailing commas
 try{parsed=JSON.parse(clean.replace(/,\s*([}\]])/g,"$1"));}catch{}
-if(!parsed){alert("❌ L'IA n'a pas pu analyser la photo. Assure-toi que le cahier est bien visible et réessaie.");return;}
+if(!parsed){alert("❌ JSON invalide. Réponse IA: "+text.slice(0,200));return;}
 }
 if(parsed.ventes&&parsed.ventes.length>0){
 currentRapport.ventes=parsed.ventes.map(v=>({
