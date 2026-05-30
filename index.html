@@ -968,7 +968,7 @@ window.createDepot=createDepot;
 function openRetourDepot(key){
 const d=getDepots().find(d=>d._key===key);if(!d)return;
 const qtyDispo=Math.max(0,(+d.qtyDeposited||0)-(+d.qtySold||0)-(+d.qtyReturned||0));
-document.getElementById("mrd2-title").textContent="🏪 "+d.lieu;
+document.getElementById("mrd2-title").textContent="🏪 "+d.lieu;document.getElementById("mrd2-title").dataset.depotKey=key;
 document.getElementById("mrd2-body").innerHTML=`
 <div style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:12px">
 <div class="grid3" style="gap:8px">
@@ -990,10 +990,10 @@ const events=[];
 });
 // Entrées stock (réappro)
 getMoves().filter(m=>m.type==="out"&&m.note&&m.note.includes("Réappro dépôt: "+d.lieu))
-.forEach(m=>{events.push({date:m.date,type:"entree",label:`📦 Stock ajouté · ${m.qty} unités`,qty:m.qty});});
+.forEach(m=>{events.push({date:m.date,type:"entree",label:`📦 Stock ajouté · ${m.qty} unités`,qty:m.qty,moveKey:m._key});});
 // Retours stock
 getMoves().filter(m=>m.type==="in"&&m.note&&m.note.includes("Retour dépôt: "+d.lieu))
-.forEach(m=>{events.push({date:m.date,type:"retour",label:`↩ Retour stock · ${m.qty} unités`,qty:m.qty});});
+.forEach(m=>{events.push({date:m.date,type:"retour",label:`↩ Retour stock · ${m.qty} unités`,qty:m.qty,moveKey:m._key});});
 // Sort by date desc
 events.sort((a,b)=>b.date.localeCompare(a.date));
 if(!events.length)return`<div style="text-align:center;color:var(--muted);font-size:12px;padding:20px 0">Aucun historique pour ce dépôt.</div>`;
@@ -1004,9 +1004,17 @@ ${events.map(e=>`<div style="display:flex;justify-content:space-between;align-it
 <div style="font-size:11px;color:var(--muted);margin-top:2px">${e.date}</div>
 </div>
 <div style="display:flex;align-items:center;gap:6px">
-${e.type==="versement"?`<span style="font-family:monospace;font-weight:800;font-size:13px;color:var(--green)">+${cfa(e.montant)}</span><button class="btn btn-ghost btn-sm" style="padding:3px 7px;font-size:10px" onclick="editVersement('${d._key}',${e.idx})">✎</button><button class="btn btn-red btn-sm" style="padding:3px 7px;font-size:10px" onclick="deleteVersement('${d._key}',${e.idx})">✕</button>`:
-e.type==="entree"?tag("+"+e.qty+" u","amber"):
-tag("-"+e.qty+" u","smoke")}
+${e.type==="versement"?
+`<span style="font-family:monospace;font-weight:800;font-size:13px;color:var(--green)">+${cfa(e.montant)}</span>
+<button class="btn btn-ghost btn-sm" style="padding:3px 7px;font-size:10px" onclick="editVersement('${d._key}',${e.idx})">✎</button>
+<button class="btn btn-red btn-sm" style="padding:3px 7px;font-size:10px" onclick="deleteVersement('${d._key}',${e.idx})">✕</button>`:
+e.type==="entree"?
+`<span>${tag("+"+e.qty+" u","amber")}</span>
+<button class="btn btn-ghost btn-sm" style="padding:3px 7px;font-size:10px" onclick="editMove('${d._key}','entree','${e.moveKey}')">✎</button>
+<button class="btn btn-red btn-sm" style="padding:3px 7px;font-size:10px" onclick="deleteMove('${e.moveKey}')">✕</button>`:
+`<span>${tag("-"+e.qty+" u","smoke")}</span>
+<button class="btn btn-ghost btn-sm" style="padding:3px 7px;font-size:10px" onclick="editMove('${d._key}','retour','${e.moveKey}')">✎</button>
+<button class="btn btn-red btn-sm" style="padding:3px 7px;font-size:10px" onclick="deleteMove('${e.moveKey}')">✕</button>`}
 </div>
 </div>`).join("")}`;
 })()}`;
@@ -1076,6 +1084,39 @@ if(qtyInput)qtyInput.value=qty;
 }
 window.calcRetourQty=calcRetourQty;
 
+async function editMove(depotKey,type,moveKey){
+const d=getDepots().find(d=>d._key===depotKey);if(!d)return;
+const m=getMoves().find(m=>m._key===moveKey);if(!m)return;
+const newQty=+prompt("Nouvelle quantité :",m.qty);
+if(!newQty||newQty<=0)return;
+const diff=newQty-m.qty;
+// Update the move
+await set(ref(db,"moves/"+moveKey),{...m,qty:newQty});
+// Update depot qty
+if(type==="entree"){
+  await set(ref(db,"depots/"+depotKey),{...d,qtyDeposited:(+d.qtyDeposited||0)+diff});
+}else if(type==="retour"){
+  const p=getP(d.productId);
+  if(p)await fbSetProduct({...p,stock:p.stock+diff});
+  await set(ref(db,"depots/"+depotKey),{...d,qtyReturned:(+d.qtyReturned||0)+diff});
+}
+alert("✅ Modifié !");
+openRetourDepot(depotKey);
+}
+window.editMove=editMove;
+
+async function deleteMove(moveKey){
+const m=getMoves().find(m=>m._key===moveKey);if(!m)return;
+if(!confirm("Supprimer cette ligne ?"))return;
+await remove(ref(db,"moves/"+moveKey));
+alert("✅ Supprimé !");
+// Reopen to refresh - find depot
+const depotKey=document.querySelector("[id='mrd2-title']")?.dataset?.depotKey;
+if(depotKey)openRetourDepot(depotKey);
+else closeModal("modal-retour-depot");
+}
+window.deleteMove=deleteMove;
+
 async function saveVersement(key){
 const d=getDepots().find(d=>d._key===key);if(!d)return;
 const montant=+document.getElementById("dv-montant").value;
@@ -1106,15 +1147,16 @@ if(!qty&&prixU&&montantRetour)qty=Math.round(montantRetour/prixU);
 if(!qty)qty=+prompt("Nombre d'unités à récupérer :",1)||1;
 const qtyDispo=Math.max(0,(+d.qtyDeposited||0)-(+d.qtySold||0)-(+d.qtyReturned||0));
 if(qty>qtyDispo)return alert("Quantité dépasse le restant (max: "+qtyDispo+")");
-if(!confirm(`Récupérer ${qty} unités en stock ?`))return;
-const p=getP(d.productId);
-if(p)await fbSetProduct({...p,stock:p.stock+qty});
+if(!confirm(`Marquer ${qty} unités comme retournées ?
+(Le stock produit ne sera PAS modifié — fais-le manuellement via + Stock)`))return;
+// On enregistre juste le mouvement pour l'historique, sans toucher au stock produit
 await fbAddMove({productId:+d.productId,productName:d.productName,type:"in",qty,date:today(),note:"Retour dépôt: "+d.lieu});
-const newQtyReturned=d.qtyReturned+qty;
-const newStatus=(d.qtyDeposited-d.qtySold-newQtyReturned)<=0?"closed":d.status;
+const newQtyReturned=(+d.qtyReturned||0)+qty;
+const newStatus=((+d.qtyDeposited||0)-(+d.qtySold||0)-newQtyReturned)<=0?"closed":d.status;
 await set(ref(db,`depots/${key}`),{...d,qtyReturned:newQtyReturned,status:newStatus});
 closeModal("modal-retour-depot");
-alert("✅ Stock récupéré !");
+alert("✅ Retour enregistré !
+📦 Pense à ajouter le stock manuellement via le bouton + Stock.");
 }
 window.saveRetourDepot=saveRetourDepot;
 
