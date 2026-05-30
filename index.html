@@ -656,14 +656,21 @@ else{const pr=(v.price-p.costPrice)*v.qty;el.innerHTML=`<div style="display:grid
 }
 
 function venteItemHtml(v){
-return`<div class="vente-item">
-<div class="vente-item-head"><span style="font-size:10px;color:var(--muted);font-weight:700">${v.type==="gros"?"⬡ GROS":"◎ DÉTAIL"}</span><button class="vente-remove" onclick="removeVente(${v.id})">✕</button></div>
+const isDepot=v.type==="depot";
+const depots=getDepots();
+const depotOptions=depots.map(d=>`<option value="${d.lieu}"${d.lieu===v.depotNom?" selected":""}>${d.lieu} (${d.status==="open"?"🟡 Actif":"✅ Terminé"})</option>`).join("");
+return`<div class="vente-item" style="${isDepot?"border-color:#f59e0b55;background:#f59e0b08":""}">
+<div class="vente-item-head">
+  <span style="font-size:10px;font-weight:700;color:${isDepot?"var(--amber)":v.type==="gros"?"var(--violet)":"var(--blue)"}">${isDepot?"🏪 DÉPÔT-VENTE":v.type==="gros"?"⬡ GROS":"◎ DÉTAIL"}</span>
+  <button class="vente-remove" onclick="removeVente(${v.id})">✕</button>
+</div>
+${isDepot?`<div class="field" style="margin-bottom:8px"><label>Dépôt destinataire</label><select onchange="updateVente(${v.id},'depotNom',this.value)"><option value="">— Choisir dépôt —</option>${depotOptions}</select></div>`:""}
 <div class="field" style="margin-bottom:8px"><label>Produit</label><select onchange="updateVente(${v.id},'productId',this.value)">${prodOptions(v.productId)}</select></div>
 <div class="grid2">
 <div class="field"><label>Quantité</label><input type="number" min="1" value="${v.qty||""}" placeholder="0" oninput="updateVente(${v.id},'qty',this.value)"/></div>
-<div class="field"><label>Prix/u (F) — 0=Cadeau</label><input type="number" min="0" value="${v.price===0&&v.productId?"0":v.price||""}" placeholder="0" oninput="updateVente(${v.id},'price',this.value)"/></div>
+${isDepot?`<div class="field"><label>Prix estimé/u (F)</label><input type="number" min="0" value="${v.price||""}" placeholder="0" oninput="updateVente(${v.id},'price',this.value)"/></div>`:`<div class="field"><label>Prix/u (F) — 0=Cadeau</label><input type="number" min="0" value="${v.price===0&&v.productId?"0":v.price||""}" placeholder="0" oninput="updateVente(${v.id},'price',this.value)"/></div>`}
 </div>
-<div id="prev-${v.id}" style="margin-top:8px;display:none"></div>
+${isDepot?`<div style="background:#f59e0b14;border:1px solid #f59e0b30;border-radius:8px;padding:8px 10px;font-size:11px;color:var(--amber);margin-top:6px">📦 Ce stock sera ajouté au dépôt sélectionné à la validation</div>`:`<div id="prev-${v.id}" style="margin-top:8px;display:none"></div>`}
 </div>`;
 }
 
@@ -682,7 +689,20 @@ nbVentes:ventes.length,
 async function validerRapport(){
 const ventes=currentRapport.ventes;
 if(!ventes.length)return alert("Ajoute au moins une vente !");
-for(const v of ventes){
+const lignesDepot=ventes.filter(v=>v.type==="depot");
+const lignesVente=ventes.filter(v=>v.type!=="depot");
+// Validation des lignes dépôt
+for(const v of lignesDepot){
+if(!v.productId)return alert("Sélectionne un produit pour chaque ligne dépôt.");
+if(!v.qty||v.qty<=0)return alert("Quantité invalide pour dépôt.");
+if(!v.depotNom)return alert("Sélectionne le dépôt destinataire pour chaque ligne 🏪");
+const depot=getDepots().find(d=>d.lieu===v.depotNom);
+if(!depot)return alert(`Dépôt introuvable: "${v.depotNom}"`);
+const p=getP(v.productId);
+if(v.qty>p.stock)return alert(`Stock insuffisant pour réappro "${v.depotNom}" (stock: ${p.stock})`);
+}
+// Validation des ventes normales
+for(const v of lignesVente){
 if(!v.productId)return alert("Sélectionne un produit pour chaque ligne.");
 if(!v.qty||v.qty<=0)return alert("Quantité invalide.");
 const p=getP(v.productId);
@@ -690,19 +710,31 @@ if(v.qty>p.stock)return alert(`Stock insuffisant pour ${p.name} (stock: ${p.stoc
 }
 if(!confirm("Valider le rapport du jour ?"))return;
 const dateStr=today();
-const ventesF=ventes.map(v=>{const p=getP(v.productId);const isGift=v.price===0;
+// Traiter les réapprovisionnements dépôt
+for(const v of lignesDepot){
+const depot=getDepots().find(d=>d.lieu===v.depotNom);
+const p=getP(v.productId);
+await fbSetProduct({...p,stock:p.stock-v.qty});
+await fbAddMove({productId:p.id,productName:p.name,type:"out",qty:v.qty,date:dateStr,note:"Réappro dépôt: "+depot.lieu});
+const newQtyDeposited=(+depot.qtyDeposited||0)+v.qty;
+await set(ref(db,`depots/${depot._key}`),{...depot,qtyDeposited:newQtyDeposited,status:"open"});
+}
+// Traiter les ventes normales
+const ventesF=lignesVente.map(v=>{const p=getP(v.productId);const isGift=v.price===0;
 return{...v,productName:p.name,costPrice:p.costPrice,profit:isGift?-p.costPrice*v.qty:(v.price-p.costPrice)*v.qty,isGift};});
 for(const v of ventesF){
 const p=getP(v.productId);
 await fbSetProduct({...p,stock:p.stock-v.qty});
 await fbAddMove({productId:p.id,productName:p.name,type:"out",qty:v.qty,date:dateStr,note:v.isGift?"Cadeau":"Vente "+v.type});
 }
-await fbAddRapport({date:dateStr,ventes:ventesF,totals:calcTotals(ventesF),source:"manual"});
+// Enregistrer le rapport (ventes normales uniquement dans les stats)
+const tousVentes=[...ventesF,...lignesDepot.map(v=>{const p=getP(v.productId);return{...v,productName:p.name,costPrice:p.costPrice,profit:0,isGift:false};})];
+await fbAddRapport({date:dateStr,ventes:tousVentes,totals:calcTotals(ventesF),source:"manual"});
 for(const v of ventesF.filter(v=>!v.isGift)){
 await fbAddSale({productId:+v.productId,productName:v.productName,qty:v.qty,salePrice:v.price,costPrice:v.costPrice,type:v.type,date:dateStr,profit:v.profit});
 }
 currentRapport={ventes:[]};rapportMode="choose";
-alert("✅ Rapport validé et synchronisé !");render();
+alert("✅ Rapport validé !"+(lignesDepot.length?`\n📦 ${lignesDepot.length} dépôt(s) réapprovisionné(s)`:""));render();
 }
 window.validerRapport=validerRapport;
 
@@ -803,67 +835,21 @@ try{parsed=JSON.parse(clean.replace(/,\s*([}\]])/g,"$1"));}catch{}
 if(!parsed){alert("❌ JSON invalide. Réponse IA: "+text.slice(0,200));return;}
 }
 if(parsed.ventes&&parsed.ventes.length>0){
-// Séparer les lignes dépôt des ventes normales
-const lignesDepot=parsed.ventes.filter(v=>v.type==="depot");
-const lignesVente=parsed.ventes.filter(v=>v.type!=="depot");
-
-// Traiter les réapprovisionnements de dépôt
-if(lignesDepot.length>0){
-  let depotMsg="";
-  for(const v of lignesDepot){
-    const nomDepot=(v.depotNom||"").trim().toLowerCase();
-    // Trouver le dépôt correspondant (recherche approximative, actif ou terminé)
-    const depot=getDepots().find(d=>(
-      d.lieu.toLowerCase().includes(nomDepot)||
-      nomDepot.includes(d.lieu.toLowerCase())||
-      d.lieu.toLowerCase()===nomDepot
-    ));
-    if(depot){
-      const qty=Math.max(1,+v.qty||1);
-      const p=getP(depot.productId);
-      if(p&&qty<=p.stock){
-        // Déduire du stock principal et ajouter au dépôt
-        await fbSetProduct({...p,stock:p.stock-qty});
-        await fbAddMove({productId:p.id,productName:p.name,type:"out",qty,date:today(),note:"Réappro dépôt: "+depot.lieu});
-        const newQtyDeposited=(+depot.qtyDeposited||0)+qty;
-        // Rouvrir le dépôt si terminé
-        await set(ref(db,`depots/${depot._key}`),{...depot,qtyDeposited:newQtyDeposited,status:"open"});
-        depotMsg+=`✅ +${qty} unités ajoutées au dépôt "${depot.lieu}"\n`;
-      }else if(!p){
-        depotMsg+=`⚠️ Produit introuvable pour dépôt "${v.depotNom}"\n`;
-      }else{
-        depotMsg+=`⚠️ Stock insuffisant pour réappro "${depot.lieu}" (stock: ${p.stock})\n`;
-      }
-    }else{
-      depotMsg+=`⚠️ Dépôt introuvable: "${v.depotNom}"\n`;
-    }
-  }
-  if(depotMsg)alert("📦 Réapprovisionnement dépôt:\n"+depotMsg);
-}
-
-// Traiter les ventes normales
-if(lignesVente.length>0){
-currentRapport.ventes=lignesVente.map(v=>({
+// Toutes les ventes (normales + dépôt) vont dans le rapport pour confirmation
+currentRapport.ventes=parsed.ventes.map(v=>({
 id:Date.now()+Math.random(),
 productId:String(v.productId),
 productName:v.productName||getP(v.productId)?.name||"",
 qty:Math.max(1,+v.qty||1),
 price:+v.price||0,
-type:v.type==="gros"?"gros":"detail",
+type:v.type==="depot"?"depot":v.type==="gros"?"gros":"detail",
+depotNom:v.depotNom||"",
 isGift:!!v.isGift,
 }));
 rapportMode="manual";
 if(parsed.notes&&parsed.notes.trim())alert("📝 Note IA: "+parsed.notes);
 render();
 setTimeout(()=>currentRapport.ventes.forEach(v=>refreshPreview(v.id)),150);
-}else if(lignesDepot.length===0){
-alert("⚠️ Aucune vente détectée sur la photo.\nVérifie que le cahier est bien lisible et bien éclairé, puis réessaie.");
-rapportMode="manual";
-render();
-}else{
-// Seulement des dépôts, pas de ventes normales
-render();
-}
 }else{
 alert("⚠️ Aucune vente détectée sur la photo.\nVérifie que le cahier est bien lisible et bien éclairé, puis réessaie.");
 rapportMode="manual";
@@ -1201,9 +1187,13 @@ if(rapportMode==="choose"){
 el.innerHTML=`<div style="font-weight:800;font-size:16px;margin-bottom:2px">📋 Rapport Journalier</div><div style="font-size:11px;color:var(--muted);margin-bottom:20px">${dateLabel(today())}</div><div style="font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Comment saisir les ventes ?</div><div class="rapport-actions" style="grid-template-columns:1fr 1fr"><div class="action-card ac-manual" onclick="rapportMode='manual';renderRapport()"><div class="action-card-ico">✍️</div><div class="action-card-title" style="color:var(--blue)">Saisie manuelle</div><div class="action-card-desc">Entrer les ventes ligne par ligne</div></div><div class="action-card ac-photo" onclick="triggerPhoto()"><div class="action-card-ico">📷</div><div class="action-card-title" style="color:#2dd4bf">Scanner le cahier</div><div class="action-card-desc">Photo → l'IA détecte les ventes</div></div></div><div class="action-card" style="background:#f59e0b14;border:1px solid #f59e0b30;text-align:center;padding:14px 12px" onclick="goTab('depots')"><div style="font-size:22px;margin-bottom:4px">🏪</div><div style="font-weight:800;font-size:12px;color:var(--amber)">Dépôt-vente</div><div style="font-size:10px;color:var(--muted);margin-top:2px">Créer ou mettre à jour un dépôt</div></div><div class="action-card ac-zero" style="text-align:center;padding:14px 12px" onclick="validerJourneeVide()"><div style="font-size:22px;margin-bottom:4px">🚫</div><div style="font-weight:800;font-size:12px;color:#9ca3af">Journée sans vente</div><div style="font-size:10px;color:var(--muted);margin-top:2px">Enregistrer 0 vente pour aujourd'hui</div></div>`;
 return;
 }
-const v=currentRapport.ventes,g=v.filter(x=>x.type==="gros"),d=v.filter(x=>x.type==="detail");
-el.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px"><button onclick="rapportMode='choose';currentRapport={ventes:[]};renderRapport()" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer">←</button><span style="font-weight:800;font-size:16px">📋 Rapport Journalier</span></div><div style="font-size:11px;color:var(--muted);margin-bottom:14px;margin-left:28px">${dateLabel(today())}</div><div class="rapport-section"><div class="rapport-section-title" style="color:var(--violet)">⬡ Ventes en Gros</div>${g.map(venteItemHtml).join("")}<button class="btn btn-violet btn-sm btn-full" onclick="addVente('gros')" style="margin-top:4px">+ Ajouter vente gros</button></div><div class="rapport-section"><div class="rapport-section-title" style="color:var(--blue)">◎ Ventes au Détail</div>${d.map(venteItemHtml).join("")}<button class="btn btn-primary btn-sm btn-full" onclick="addVente('detail')" style="margin-top:4px">+ Ajouter vente détail</button></div>${v.length?`<div class="card"><div style="font-weight:800;font-size:12px;margin-bottom:8px">⚡ Récap en cours</div><div class="grid3"><div class="prod-cell"><div class="prod-cell-lbl">Total</div><div class="prod-cell-val">${v.length}</div></div><div class="prod-cell"><div class="prod-cell-lbl">Gros</div><div class="prod-cell-val" style="color:var(--violet)">${g.length}</div></div><div class="prod-cell"><div class="prod-cell-lbl">Détail</div><div class="prod-cell-val" style="color:var(--blue)">${d.length}</div></div></div></div><button class="btn btn-green btn-full" onclick="validerRapport()" style="padding:14px">✅ Valider le rapport du jour</button>`:`<div class="empty">Ajoute des ventes ou scanne ton cahier 📷</div>`}`;
-v.forEach(x=>refreshPreview(x.id));
+const v=currentRapport.ventes,g=v.filter(x=>x.type==="gros"),d=v.filter(x=>x.type==="detail"),dep=v.filter(x=>x.type==="depot");
+el.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px"><button onclick="rapportMode='choose';currentRapport={ventes:[]};renderRapport()" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer">←</button><span style="font-weight:800;font-size:16px">📋 Rapport Journalier</span></div><div style="font-size:11px;color:var(--muted);margin-bottom:14px;margin-left:28px">${dateLabel(today())}</div>
+${dep.length?`<div class="rapport-section" style="border-color:#f59e0b55"><div class="rapport-section-title" style="color:var(--amber)">🏪 Réappro Dépôts-vente</div>${dep.map(venteItemHtml).join("")}<button class="btn btn-amber btn-sm btn-full" onclick="addVente('depot')" style="margin-top:4px">+ Ajouter réappro dépôt</button></div>`:""}
+<div class="rapport-section"><div class="rapport-section-title" style="color:var(--violet)">⬡ Ventes en Gros</div>${g.map(venteItemHtml).join("")}<button class="btn btn-violet btn-sm btn-full" onclick="addVente('gros')" style="margin-top:4px">+ Ajouter vente gros</button></div><div class="rapport-section"><div class="rapport-section-title" style="color:var(--blue)">◎ Ventes au Détail</div>${d.map(venteItemHtml).join("")}<button class="btn btn-primary btn-sm btn-full" onclick="addVente('detail')" style="margin-top:4px">+ Ajouter vente détail</button></div>
+${dep.length?`<div style="background:#f59e0b14;border:1px solid #f59e0b33;border-radius:12px;padding:12px;margin-bottom:10px;font-size:12px;color:var(--amber)">⚠️ Vérifie bien les dépôts destinataires avant de valider !</div>`:""}
+${v.length?`<div class="card"><div style="font-weight:800;font-size:12px;margin-bottom:8px">⚡ Récap en cours</div><div class="grid3"><div class="prod-cell"><div class="prod-cell-lbl">Ventes</div><div class="prod-cell-val">${g.length+d.length}</div></div><div class="prod-cell"><div class="prod-cell-lbl">Gros</div><div class="prod-cell-val" style="color:var(--violet)">${g.length}</div></div><div class="prod-cell"><div class="prod-cell-lbl">Dépôts</div><div class="prod-cell-val" style="color:var(--amber)">${dep.length}</div></div></div></div><button class="btn btn-green btn-full" onclick="validerRapport()" style="padding:14px">✅ Valider le rapport du jour</button>`:`<div class="empty">Ajoute des ventes ou scanne ton cahier 📷</div>`}`;
+v.filter(x=>x.type!=="depot").forEach(x=>refreshPreview(x.id));
 }
 
 function render(){
