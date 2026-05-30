@@ -1644,7 +1644,11 @@ ${lignes.map(l=>`<div style="display:flex;justify-content:space-between;font-siz
 <span style="font-family:monospace;color:var(--amber)">${cfa(total)}</span>
 </div>
 </div>
-${isEnAttente?`<button class="btn btn-green btn-full" onclick="confirmerReception('${c._key}')">📦 Confirmer réception → Ajouter au stock</button>`:""}
+${isEnAttente?`<div style="display:flex;gap:8px">
+<button class="btn btn-green" style="flex:3" onclick="confirmerReception('${c._key}')">📦 Confirmer réception → Stock</button>
+<button class="btn btn-ghost" style="flex:1" onclick="editCommande('${c._key}')">✎</button>
+<button class="btn btn-red btn-sm" onclick="deleteCommande('${c._key}')">✕</button>
+</div>`:""}
 ${c.note?`<div style="font-size:11px;color:var(--muted);margin-top:8px;font-style:italic">${c.note}</div>`:""}
 </div>`;
 }
@@ -1843,6 +1847,101 @@ render();
 }
 window.validerReception=validerReception;
 
+function editCommande(key){
+const c=getCommandes().find(c=>c._key===key);if(!c)return;
+const lignes=c.lignes||[];
+const prodOptions=(selectedId)=>'<option value="">— Choisir —</option>'+getProducts().map(p=>`<option value="${p.id}" data-nom="${p.name}" data-prix="${p.costPrice}" ${String(p.id)===String(selectedId)?"selected":""}>${p.name}</option>`).join('')+'<option value="__nouveau__">➕ Nouveau produit</option>';
+
+let lignesHTML=lignes.map((l,i)=>`<div id="edit-ligne-${i}" style="background:var(--bg);border-radius:10px;padding:10px;border:1px solid var(--border);margin-bottom:8px">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+<span style="font-size:11px;font-weight:700;color:var(--muted)">Produit ${i+1}</span>
+<button onclick="document.getElementById('edit-ligne-${i}').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px">✕</button>
+</div>
+<div class="field" style="margin-bottom:8px"><select class="cmd-produit-select" onchange="onCmdProduitChange(this,'edit-ligne-${i}')">${prodOptions(l.produitId)}</select></div>
+<div id="edit-ligne-${i}-nom-field" style="display:none" class="field" style="margin-bottom:8px"><label>Nom</label><input type="text" class="cmd-nouveau-nom" value="${l.produit||""}"/></div>
+<div class="grid2" style="gap:8px">
+<div class="field"><label>Quantité</label><input type="number" class="cmd-qty" min="1" value="${l.qty||1}"/></div>
+<div class="field"><label>Prix/u (F)</label><input type="number" class="cmd-prix" min="0" value="${l.prixRevient||0}"/></div>
+</div>
+</div>`).join("");
+
+const html=`<div class="overlay" id="modal-edit-commande" style="display:flex">
+<div class="sheet" style="max-height:95dvh">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">✎ Modifier commande</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-edit-commande');document.getElementById('modal-edit-commande').remove()">✕</button></div>
+<div class="sheet-body">
+<div class="field"><label>Fournisseur</label><input type="text" id="edit-cmd-fournisseur" value="${c.fournisseur||""}"/></div>
+<div class="field"><label>Date</label><input type="date" id="edit-cmd-date" value="${c.date||today()}"/></div>
+<div id="cmd-lignes">${lignesHTML}</div>
+<button class="btn btn-ghost btn-sm btn-full" onclick="addCmdLigne()" style="margin-top:6px">+ Ajouter produit</button>
+<div class="field"><label>Note</label><input type="text" id="edit-cmd-note" value="${c.note||""}"/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-edit-commande');document.getElementById('modal-edit-commande').remove()">Annuler</button>
+<button class="btn btn-amber" style="flex:2" onclick="saveEditCommande('${key}',${c.totalMontant||0})">💾 Sauvegarder</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.editCommande=editCommande;
+
+async function saveEditCommande(key, ancienTotal){
+const c=getCommandes().find(c=>c._key===key);if(!c)return;
+const fournisseur=document.getElementById("edit-cmd-fournisseur").value.trim();
+const date=document.getElementById("edit-cmd-date").value;
+const note=document.getElementById("edit-cmd-note").value.trim();
+const lignesEls=document.getElementById("cmd-lignes").children;
+const lignes=[];
+let total=0;
+for(const el of lignesEls){
+  const select=el.querySelector(".cmd-produit-select");
+  const qtyEl=el.querySelector(".cmd-qty");
+  const prixEl=el.querySelector(".cmd-prix");
+  const nomEl=el.querySelector(".cmd-nouveau-nom");
+  if(!select||!qtyEl||!prixEl)continue;
+  const qty=+qtyEl.value;
+  const prix=+prixEl.value;
+  if(!qty||!prix)continue;
+  let produitId=select.value;
+  let produitNom="";
+  if(produitId==="__nouveau__"){
+    produitNom=nomEl?.value.trim()||"Nouveau produit";
+    produitId=null;
+  }else{
+    const p=getP(produitId);
+    produitNom=p?p.name:select.options[select.selectedIndex]?.text||"?";
+  }
+  lignes.push({produitId:produitId||null,produit:produitNom,qty,prixRevient:prix});
+  total+=qty*prix;
+}
+if(!lignes.length)return alert("Ajoute au moins un produit !");
+// Ajuster la caisse : annuler l'ancien débit, appliquer le nouveau
+const diff=total-ancienTotal;
+if(diff!==0){
+  const ak=push(ref(db,"caisseConfig/apports")).key;
+  await set(ref(db,"caisseConfig/apports/"+ak),{_key:ak,montant:-diff,date:date||today(),note:"✎ Ajust. commande: "+(fournisseur||"Fournisseur")});
+}
+await set(ref(db,"commandes/"+key),{...c,fournisseur,date,note,lignes,totalMontant:total});
+closeModal("modal-edit-commande");
+document.getElementById("modal-edit-commande")?.remove();
+alert("✅ Commande modifiée !"+(diff!==0?" | Caisse ajustée: "+(diff>0?"-":"+")+(cfa(Math.abs(diff))):""));
+render();
+}
+window.saveEditCommande=saveEditCommande;
+
+async function deleteCommande(key){
+const c=getCommandes().find(c=>c._key===key);if(!c)return;
+if(!confirm("Supprimer cette commande ?\nLe montant sera recrédité dans la caisse."))return;
+// Recréditer la caisse
+const ak=push(ref(db,"caisseConfig/apports")).key;
+await set(ref(db,"caisseConfig/apports/"+ak),{_key:ak,montant:+c.totalMontant||0,date:today(),note:"❌ Annulation commande: "+(c.fournisseur||"Fournisseur")});
+await remove(ref(db,"commandes/"+key));
+alert("✅ Commande supprimée | Caisse recréditée de "+cfa(+c.totalMontant||0));
+render();
+}
+window.deleteCommande=deleteCommande;
+
 async function saveApport(){
 const montant=+document.getElementById("ap-montant").value;
 const date=document.getElementById("ap-date").value;
@@ -2036,11 +2135,13 @@ if(!fbLoaded){el.innerHTML=`<div class="loading">⏳ Chargement des données...<
 if(currentTab==="dashboard"){
 const m=monthStats(mk),totalB=getSales().reduce((a,s)=>a+s.profit,0),low=getProducts().filter(p=>p.stock<=5);
 const capital=calcCapital();
+const capitalEngage=getCommandes().filter(c=>c.status==="en_attente").reduce((a,c)=>a+(+c.totalMontant||0),0);
 const depMoisDash=getDepensesForMonth(mk);
 const beneficeReelDash=m.profit-(depMoisDash?.total||0);
 const cd=Array.from({length:6},(_,i)=>{const dd=new Date(d.getFullYear(),d.getMonth()-5+i,1);const k=`${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,"0")}`;return{lbl:MONTHS[dd.getMonth()],v:monthStats(k).profit};});
 const bmax=Math.max(...cd.map(x=>x.v),1);
-el.innerHTML=`${monthCardHtml(mk,currentLabel,true)}<div class="grid2" style="margin-bottom:12px"><div class="stat-box"><div class="stat-label">Bénéf. net réel (mois)</div><div class="stat-val" style="color:${beneficeReelDash>=0?"var(--green)":"var(--red)"};font-size:14px">${beneficeReelDash>=0?"+":""}${cfa(Math.round(beneficeReelDash))}</div><div class="stat-sub">${depMoisDash?"Dépenses: -"+cfa(depMoisDash.total):"⚠️ Dépenses non saisies"}</div></div><div class="stat-box"><div class="stat-label">CA ce mois</div><div class="stat-val" style="color:var(--blue);font-size:14px">${cfa(m.ca)}</div></div><div class="stat-box"><div class="stat-label">Capital stock</div><div class="stat-val" style="color:var(--violet);font-size:13px">${cfa(capital)}</div><div class="stat-sub">${getProducts().reduce((a,p)=>a+p.stock,0)} unités</div></div><div class="stat-box"><div class="stat-label">Bénéf. brut total</div><div class="stat-val" style="color:var(--green);font-size:13px">${cfa(totalB)}</div></div></div><div class="card"><div style="font-weight:800;font-size:13px;margin-bottom:12px">📈 Bénéfices 6 mois</div><div class="bar-chart">${cd.map((x,i)=>{const h=x.v?Math.round((x.v/bmax)*60):2;return`<div class="bar-col"><div class="bar" style="height:${h}px;background:hsl(${210-i*8},60%,${38+(x.v/bmax)*22}%)"></div><span class="bar-lbl">${x.lbl}</span></div>`;}).join("")}</div></div>${low.length?`<div class="card"><div style="font-weight:800;font-size:13px;margin-bottom:10px">⚠️ Stock faible</div>${low.map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)"><span style="font-size:13px;font-weight:600">${p.name}</span>${tag(p.stock+" unités",p.stock===0?"red":"amber")}</div>`).join("")}</div>`:""}`;
+el.innerHTML=`${monthCardHtml(mk,currentLabel,true)}<div class="grid2" style="margin-bottom:12px"><div class="stat-box"><div class="stat-label">Bénéf. net réel (mois)</div><div class="stat-val" style="color:${beneficeReelDash>=0?"var(--green)":"var(--red)"};font-size:14px">${beneficeReelDash>=0?"+":""}${cfa(Math.round(beneficeReelDash))}</div><div class="stat-sub">${depMoisDash?"Dépenses: -"+cfa(depMoisDash.total):"⚠️ Dépenses non saisies"}</div></div><div class="stat-box"><div class="stat-label">CA ce mois</div><div class="stat-val" style="color:var(--blue);font-size:14px">${cfa(m.ca)}</div></div><div class="stat-box"><div class="stat-label">Capital stock</div><div class="stat-val" style="color:var(--violet);font-size:13px">${cfa(capital)}</div><div class="stat-sub">${getProducts().reduce((a,p)=>a+p.stock,0)} unités</div></div>
+${capitalEngage>0?`<div class="stat-box" style="border-color:#f59e0b44"><div class="stat-label">💸 Engagé commandes</div><div class="stat-val" style="color:var(--amber);font-size:13px">${cfa(capitalEngage)}</div><div class="stat-sub">${getCommandes().filter(c=>c.status==="en_attente").length} commande(s) en attente</div></div>`:""}<div class="stat-box"><div class="stat-label">Bénéf. brut total</div><div class="stat-val" style="color:var(--green);font-size:13px">${cfa(totalB)}</div></div></div><div class="card"><div style="font-weight:800;font-size:13px;margin-bottom:12px">📈 Bénéfices 6 mois</div><div class="bar-chart">${cd.map((x,i)=>{const h=x.v?Math.round((x.v/bmax)*60):2;return`<div class="bar-col"><div class="bar" style="height:${h}px;background:hsl(${210-i*8},60%,${38+(x.v/bmax)*22}%)"></div><span class="bar-lbl">${x.lbl}</span></div>`;}).join("")}</div></div>${low.length?`<div class="card"><div style="font-weight:800;font-size:13px;margin-bottom:10px">⚠️ Stock faible</div>${low.map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)"><span style="font-size:13px;font-weight:600">${p.name}</span>${tag(p.stock+" unités",p.stock===0?"red":"amber")}</div>`).join("")}</div>`:""}`;
 }
 else if(currentTab==="produits"){
 const stockIn=getMoves().filter(m=>m.type==="in"&&!m.note?.startsWith("Retour dépôt")).sort((a,b)=>b.date.localeCompare(a.date));
