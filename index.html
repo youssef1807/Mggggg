@@ -228,6 +228,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Syne',
 <button class="nav-btn" id="nav-produits" onclick="goTab('produits')" style="display:none"><span class="ico">📦</span><span class="lbl">Produits</span></button>
 <button class="nav-btn" id="nav-stats" onclick="goTab('stats')" style="display:none"><span class="ico">📈</span><span class="lbl">Stats</span></button>
 <button class="nav-btn" id="nav-depenses" onclick="goTab('depenses')" style="display:none"><span class="ico">💸</span><span class="lbl">Dépenses</span></button>
+<button class="nav-btn" id="nav-caisse" onclick="goTab('caisse')" style="display:none"><span class="ico">🏦</span><span class="lbl">Caisse</span></button>
+<button class="nav-btn" id="nav-credits" onclick="goTab('credits')"><span class="ico">🤝</span><span class="lbl">Crédits</span></button>
 <button class="nav-btn" id="nav-historique" onclick="goTab('historique')"><span class="ico">🗂</span><span class="lbl">Histo</span></button>
 </nav>
 </div>
@@ -456,6 +458,7 @@ onValue(ref(db,"rapports"),(snap)=>{fbRapports=snap.val()||{};if(role)render();}
 onValue(ref(db,"moves"),(snap)=>{fbMoves=snap.val()||{};if(role)render();});
 initDepotListener();
 initDepensesListener();
+initCaisseCreditsListeners();
 onValue(ref(db,".info/connected"),(snap)=>{setSyncStatus(snap.val()?"online":"offline");});
 }catch(e){
 console.warn("Firebase error:", e.message);
@@ -527,6 +530,8 @@ else{b.className="role-badge role-employe";b.textContent="👤 Employé";}
 ["nav-dashboard","nav-produits","nav-stats"].forEach(id=>document.getElementById(id).style.display=role==="admin"?"flex":"none");
 document.getElementById("nav-depots").style.display="flex";
 document.getElementById("nav-depenses").style.display=role==="admin"?"flex":"none";
+document.getElementById("nav-caisse").style.display=role==="admin"?"flex":"none";
+document.getElementById("nav-credits").style.display="flex";
 document.getElementById("btn-stock").style.display=role==="admin"?"inline-flex":"none";
 currentTab=role==="admin"?"dashboard":"rapport";
 rapportMode="choose";
@@ -1345,6 +1350,256 @@ addDepenseLigne();
 openModal("modal-add-depenses");
 }
 window.openAddDepenses=openAddDepenses;
+window.openAddDepenses=openAddDepenses;
+
+// ── CAISSE & CREDITS ───────────────────────────────────────────────────────────
+let fbCredits={};
+let fbCaisseConfig={};
+
+function initCaisseCreditsListeners(){
+onValue(ref(db,"credits"),(snap)=>{fbCredits=snap.val()||{};if(role&&(currentTab==="credits"||currentTab==="caisse"))render();});
+onValue(ref(db,"caisseConfig"),(snap)=>{fbCaisseConfig=snap.val()||{};if(role&&currentTab==="caisse")render();});
+}
+const getCredits=()=>toArr(fbCredits);
+
+// ── CAISSE RENDER ──────────────────────────────────────────────────────────────
+function renderCaisse(){
+const el=document.getElementById("content");if(!el)return;
+const soldeDepart=+(fbCaisseConfig.soldeDepart||0);
+
+// Build all cash flow entries grouped by date
+const allDays={};
+const addEntry=(date,label,montant,type)=>{
+  if(!date)return;
+  if(!allDays[date])allDays[date]={entrees:[],sorties:[]};
+  if(montant>0)allDays[date].entrees.push({label,montant,type});
+  else allDays[date].sorties.push({label,montant:Math.abs(montant),type});
+};
+
+// Ventes depuis rapports
+getRapports().forEach(r=>{
+  if(!r.totals||r.source==="zero")return;
+  if(r.totals.totalCA>0)addEntry(r.date,"💰 Ventes ("+r.totals.nbVentes+" ventes)",r.totals.totalCA,"vente");
+});
+
+// Versements dépôts
+getDepots().forEach(d=>{
+  (d.versements||[]).forEach(v=>{
+    addEntry(v.date,"🏪 Versement dépôt: "+d.lieu,+v.montant,"depot");
+  });
+});
+
+// Remboursements crédits
+getCredits().forEach(c=>{
+  (c.remboursements||[]).forEach(r=>{
+    addEntry(r.date,"🤝 Remb. crédit: "+(c.client||"?"),+r.montant,"credit");
+  });
+});
+
+// Dépenses
+const depenses=toArr(fbDepenses);
+depenses.forEach(d=>{
+  const [y,m]=d.mois.split("-");
+  const dateRef=d.mois+"-01";
+  (d.lignes||[]).forEach(l=>{
+    addEntry(dateRef,"💸 "+l.cat,-l.montant,"depense");
+  });
+});
+
+const sortedDates=Object.keys(allDays).sort((a,b)=>b.localeCompare(a));
+
+// Calcul solde cumulé
+let totalEntrees=0,totalSorties=0;
+Object.values(allDays).forEach(day=>{
+  day.entrees.forEach(e=>totalEntrees+=e.montant);
+  day.sorties.forEach(s=>totalSorties+=s.montant);
+});
+const soldeActuel=soldeDepart+totalEntrees-totalSorties;
+
+el.innerHTML=`
+<div class="sec-head"><span class="sec-title">🏦 Caisse</span>
+<button class="btn btn-ghost btn-sm" onclick="setSoldeDepart()">⚙️ Solde départ</button>
+</div>
+
+<div style="background:${soldeActuel>=0?"#22c55e14":"#ef444414"};border:1px solid ${soldeActuel>=0?"#22c55e44":"#ef444444"};border-radius:16px;padding:18px;margin-bottom:16px;text-align:center">
+<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">💰 Solde actuel</div>
+<div style="font-family:'JetBrains Mono',monospace;font-weight:800;font-size:28px;color:${soldeActuel>=0?"var(--green)":"var(--red)"}">${cfa(Math.round(soldeActuel))}</div>
+${soldeDepart?`<div style="font-size:11px;color:var(--muted);margin-top:4px">Solde départ: ${cfa(soldeDepart)}</div>`:""}
+</div>
+
+<div class="grid2" style="margin-bottom:16px">
+<div class="stat-box"><div class="stat-label">📥 Total entrées</div><div class="stat-val" style="color:var(--green);font-size:14px">${cfa(Math.round(totalEntrees))}</div></div>
+<div class="stat-box"><div class="stat-label">📤 Total sorties</div><div class="stat-val" style="color:var(--red);font-size:14px">${cfa(Math.round(totalSorties))}</div></div>
+</div>
+
+<div style="font-weight:800;font-size:13px;margin-bottom:10px">📅 Historique journalier</div>
+
+${sortedDates.length===0?`<div class="empty">Aucune transaction enregistrée.</div>`:""}
+
+${sortedDates.map(date=>{
+const day=allDays[date];
+const dayEntrees=day.entrees.reduce((a,e)=>a+e.montant,0);
+const daySorties=day.sorties.reduce((a,s)=>a+s.montant,0);
+const dayNet=dayEntrees-daySorties;
+return`<div class="card" style="margin-bottom:10px">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+<span style="font-weight:800;font-size:13px">${dateLabel(date)}</span>
+<span style="font-family:monospace;font-weight:800;font-size:13px;color:${dayNet>=0?"var(--green)":"var(--red)"}">${dayNet>=0?"+":""}${cfa(Math.round(dayNet))}</span>
+</div>
+${day.entrees.map(e=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
+<span style="color:var(--text)">${e.label}</span>
+<span style="font-family:monospace;color:var(--green);font-weight:700">+${cfa(e.montant)}</span>
+</div>`).join("")}
+${day.sorties.map(s=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
+<span style="color:var(--text)">${s.label}</span>
+<span style="font-family:monospace;color:var(--red);font-weight:700">-${cfa(s.montant)}</span>
+</div>`).join("")}
+</div>`;
+}).join("")}`;
+}
+
+async function setSoldeDepart(){
+const actuel=+(fbCaisseConfig.soldeDepart||0);
+const val=prompt("Solde de caisse de départ (F CFA):",actuel);
+if(val===null)return;
+const montant=+val||0;
+await set(ref(db,"caisseConfig/soldeDepart"),montant);
+render();
+}
+window.setSoldeDepart=setSoldeDepart;
+
+// ── CREDITS RENDER ─────────────────────────────────────────────────────────────
+function renderCredits(){
+const el=document.getElementById("content");if(!el)return;
+const credits=getCredits().sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+const creditsActifs=credits.filter(c=>c.status!=="soldé");
+const totalDu=creditsActifs.reduce((a,c)=>a+(+c.montantRestant||0),0);
+
+el.innerHTML=`
+<div class="sec-head"><span class="sec-title">🤝 Crédits clients</span>
+<button class="btn btn-primary btn-sm" onclick="openAddCredit()">+ Nouveau</button>
+</div>
+
+${totalDu>0?`<div style="background:#ef444414;border:1px solid #ef444433;border-radius:14px;padding:14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center">
+<span style="font-size:12px;font-weight:700;color:var(--muted)">💳 Total dû par les clients</span>
+<span style="font-family:monospace;font-weight:800;font-size:18px;color:var(--red)">${cfa(Math.round(totalDu))}</span>
+</div>`:""}
+
+${creditsActifs.length===0?`<div class="empty">Aucun crédit en cours. 🎉</div>`:""}
+
+${creditsActifs.map(c=>{
+const rembTotal=(c.remboursements||[]).reduce((a,r)=>a+(+r.montant||0),0);
+const restant=+c.montantRestant||0;
+const solde=c.status==="soldé";
+return`<div class="card" style="border-color:${solde?"#22c55e33":"#ef444433"};margin-bottom:10px">
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+<div>
+<div style="font-weight:800;font-size:14px">${c.client||"?"}</div>
+<div style="font-size:11px;color:var(--muted);margin-top:2px">${c.date||"—"} · ${c.note||""}</div>
+</div>
+${tag(solde?"✅ Soldé":"⏳ En cours",solde?"green":"red")}
+</div>
+<div class="grid2" style="gap:6px;margin-bottom:10px">
+<div class="prod-cell"><div class="prod-cell-lbl">Montant initial</div><div class="prod-cell-val">${cfa(+c.montantInitial||0)}</div></div>
+<div class="prod-cell"><div class="prod-cell-lbl">Reste dû</div><div class="prod-cell-val" style="color:${solde?"var(--green)":"var(--red)"}">${solde?"0 F":cfa(Math.round(restant))}</div></div>
+</div>
+${!solde?`<div style="display:flex;gap:6px">
+<button class="btn btn-green btn-sm" style="flex:2" onclick="openRemboursement('${c._key}')">💰 Remboursement</button>
+<button class="btn btn-ghost btn-sm" style="flex:1" onclick="deleteCredit('${c._key}')">✕</button>
+</div>`:`<button class="btn btn-ghost btn-sm btn-full" onclick="deleteCredit('${c._key}')">Supprimer</button>`}
+${(c.remboursements||[]).length?`<div style="margin-top:10px">
+<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">Historique remboursements</div>
+${(c.remboursements||[]).map(r=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
+<span>${r.date}</span><span style="font-family:monospace;color:var(--green)">+${cfa(r.montant)}</span>
+</div>`).join("")}
+</div>`:""}
+</div>`;
+}).join("")}`;
+}
+
+function openAddCredit(){
+const html=`<div class="overlay" id="modal-add-credit" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">🤝 Nouveau crédit</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-add-credit')">✕</button></div>
+<div class="sheet-body">
+<div class="field"><label>Nom du client</label><input type="text" id="cr-client" placeholder="ex: Mamadou"/></div>
+<div class="field"><label>Montant du crédit (F CFA)</label><input type="number" id="cr-montant" placeholder="ex: 15000"/></div>
+<div class="field"><label>Date</label><input type="date" id="cr-date" value="${today()}"/></div>
+<div class="field"><label>Note (optionnel)</label><input type="text" id="cr-note" placeholder="ex: Achat 2 Elf Bar"/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-add-credit')">Annuler</button>
+<button class="btn btn-primary" style="flex:2" onclick="saveCredit()">✅ Enregistrer</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.openAddCredit=openAddCredit;
+
+async function saveCredit(){
+const client=document.getElementById("cr-client").value.trim();
+const montant=+document.getElementById("cr-montant").value;
+const date=document.getElementById("cr-date").value;
+const note=document.getElementById("cr-note").value.trim();
+if(!client||!montant)return alert("Nom et montant obligatoires !");
+const k=push(ref(db,"credits")).key;
+await set(ref(db,"credits/"+k),{_key:k,client,montantInitial:montant,montantRestant:montant,date,note,status:"en cours",remboursements:[]});
+closeModal("modal-add-credit");
+document.getElementById("modal-add-credit")?.remove();
+render();
+}
+window.saveCredit=saveCredit;
+
+function openRemboursement(key){
+const c=getCredits().find(c=>c._key===key);if(!c)return;
+const html=`<div class="overlay" id="modal-remb" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">💰 Remboursement — ${c.client}</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-remb');document.getElementById('modal-remb').remove()">✕</button></div>
+<div class="sheet-body">
+<div style="background:var(--bg);border-radius:9px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between">
+<span style="font-size:12px;color:var(--muted)">Reste dû</span>
+<span style="font-family:monospace;font-weight:800;color:var(--red)">${cfa(+c.montantRestant||0)}</span>
+</div>
+<div class="field"><label>Montant remboursé (F CFA)</label><input type="number" id="remb-montant" placeholder="ex: 5000" max="${c.montantRestant}"/></div>
+<div class="field"><label>Date</label><input type="date" id="remb-date" value="${today()}"/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-remb');document.getElementById('modal-remb').remove()">Annuler</button>
+<button class="btn btn-green" style="flex:2" onclick="saveRemboursement('${key}')">✅ Enregistrer</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.openRemboursement=openRemboursement;
+
+async function saveRemboursement(key){
+const c=getCredits().find(c=>c._key===key);if(!c)return;
+const montant=+document.getElementById("remb-montant").value;
+const date=document.getElementById("remb-date").value;
+if(!montant||montant<=0)return alert("Montant invalide !");
+if(montant>(+c.montantRestant||0))return alert("Montant dépasse le reste dû ("+cfa(c.montantRestant)+")");
+const remboursements=[...(c.remboursements||[]),{date,montant}];
+const newRestant=(+c.montantRestant||0)-montant;
+const newStatus=newRestant<=0?"soldé":"en cours";
+await set(ref(db,"credits/"+key),{...c,montantRestant:Math.max(0,newRestant),remboursements,status:newStatus});
+closeModal("modal-remb");
+document.getElementById("modal-remb")?.remove();
+alert("✅ Remboursement enregistré !
+💡 Ce montant apparaît dans la Caisse.");
+render();
+}
+window.saveRemboursement=saveRemboursement;
+
+async function deleteCredit(key){
+if(!confirm("Supprimer ce crédit ?"))return;
+await remove(ref(db,"credits/"+key));
+render();
+}
+window.deleteCredit=deleteCredit;
 
 function renderRapport(){
 const el=document.getElementById("content");
@@ -1366,6 +1621,8 @@ if(!role)return;
 if(currentTab==="rapport"){renderRapport();return;}
 if(currentTab==="depots"){renderDepots();return;}
 if(currentTab==="depenses"){renderDepenses();return;}
+if(currentTab==="caisse"){renderCaisse();return;}
+if(currentTab==="credits"){renderCredits();return;}
 const el=document.getElementById("content");
 const mk=nowMK();const d=new Date();
 const currentLabel=`${MONTHS_FULL[d.getMonth()]} ${d.getFullYear()}`;
