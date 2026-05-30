@@ -380,7 +380,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Syne',
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script>
-// Catch cross-origin script errors silently (Firebase CDN on file://)
 window.addEventListener("error", function(e) {
   if (e.message === "Script error." || e.message === "Script error") {
     e.preventDefault(); return true;
@@ -408,7 +407,7 @@ const fbApp=initializeApp(firebaseConfig);
 const db=firebase.database();
 
 // ── GEMINI API KEY ─────────────────────────────────────────────────────────────
-const GEMINI_API_KEY="AIzaSyAQ.Ab8RN6JS_GkTzTJf3o34i_Kusat8V7B4ea4UNZ_cDhdZ_rN7oA";
+const GEMINI_API_KEY="AQ.Ab8RN6KnDB60adnciV2zV7SnYmI_1FFFRX5ktHy_mspqvBRX1g";
 const GEMINI_URL=`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
 // ── CONSTANTS ──────────────────────────────────────────────────────────────────
@@ -416,7 +415,6 @@ const PW_ADMIN="Yousshadi1010",PW_EMPLOYE="Nour1010";
 const MONTHS=["Jan","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Déc"];
 const MONTHS_FULL=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
 
-// ── STATE ──────────────────────────────────────────────────────────────────────
 let role=null,selectedLoginRole=null;
 let rapportMode="choose";
 let currentRapport={ventes:[]};
@@ -425,7 +423,6 @@ let currentTab="rapport";
 let fbProducts={},fbSales={},fbRapports={},fbMoves={};
 let fbLoaded=false;
 
-// ── UTILS ──────────────────────────────────────────────────────────────────────
 const cfa=n=>Number(n).toLocaleString("fr-FR")+" F";
 const today=()=>new Date().toISOString().slice(0,10);
 const nowMK=()=>{const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;};
@@ -439,7 +436,6 @@ const getRapports=()=>toArr(fbRapports);
 const getMoves=()=>toArr(fbMoves);
 const getP=id=>getProducts().find(p=>p.id===+id||p._key===String(id));
 
-// ── FIREBASE SYNC ──────────────────────────────────────────────────────────────
 function initFirebase(){
 try{
 setSyncStatus("sync");
@@ -462,9 +458,8 @@ initDepotListener();
 initDepensesListener();
 onValue(ref(db,".info/connected"),(snap)=>{setSyncStatus(snap.val()?"online":"offline");});
 }catch(e){
-console.warn("Firebase error (mode local?):", e.message);
-fbLoaded=true;
-setSyncStatus("offline");
+console.warn("Firebase error:", e.message);
+fbLoaded=true;setSyncStatus("offline");
 }
 }
 
@@ -477,7 +472,6 @@ else if(status==="offline"){b.className="sync-banner offline";t.textContent="�
 else{b.className="sync-banner";t.textContent="⏳ Synchronisation...";}
 }
 
-// ── FIREBASE WRITE HELPERS ─────────────────────────────────────────────────────
 function fbSetProduct(p){return set(ref(db,`products/${p.id}`),p);}
 function fbDeleteProduct(id){return remove(ref(db,`products/${id}`));}
 function fbAddSale(s){const k=push(ref(db,"sales")).key;return set(ref(db,`sales/${k}`),{...s,_key:k});}
@@ -493,10 +487,8 @@ const toDelete=getMoves().filter(m=>m.date===date&&m.type==="out");
 return Promise.all(toDelete.map(m=>remove(ref(db,`moves/${m._key}`))));
 }
 
-// ── AUTO-LOCK ──────────────────────────────────────────────────────────────────
 document.addEventListener("visibilitychange",()=>{if(document.hidden&&role)logout();});
 
-// ── LOGIN ──────────────────────────────────────────────────────────────────────
 function selectRole(r){
 selectedLoginRole=r;
 document.getElementById("card-admin").classList.remove("selected-admin","selected-employe");
@@ -554,7 +546,6 @@ document.getElementById("login-pw").value="";
 }
 window.logout=logout;
 
-// ── TABS ───────────────────────────────────────────────────────────────────────
 function goTab(t){
 currentTab=t;
 if(t==="rapport")rapportMode="choose";
@@ -580,7 +571,6 @@ window.openModal=openModal;
 function closeModal(id){document.getElementById(id).style.display="none";}
 window.closeModal=closeModal;
 
-// ── STOCK IN ───────────────────────────────────────────────────────────────────
 async function recordStockIn(){
 const pid=document.getElementById("in-product").value;
 const qty=+document.getElementById("in-qty").value;
@@ -595,7 +585,6 @@ closeModal("modal-stock-in");
 }
 window.recordStockIn=recordStockIn;
 
-// ── PRODUCTS ───────────────────────────────────────────────────────────────────
 async function addProduct(){
 const name=document.getElementById("np-name").value.trim();
 const cost=+document.getElementById("np-cost").value;
@@ -638,7 +627,6 @@ await fbDeleteProduct(id);
 }
 window.deleteProduct=deleteProduct;
 
-// ── RAPPORT ────────────────────────────────────────────────────────────────────
 function prodOptions(selectedId){
 return'<option value="">— Choisir —</option>'+getProducts().map(p=>`<option value="${p.id}"${+p.id===+selectedId?" selected":""}>${p.name} (stock: ${p.stock})</option>`).join("");
 }
@@ -726,27 +714,22 @@ alert("✅ Journée sans vente enregistrée.");render();
 }
 window.validerJourneeVide=validerJourneeVide;
 
-// ── PHOTO IA — GEMINI (GRATUIT) ────────────────────────────────────────────────
 function triggerPhoto(){document.getElementById("photo-input").click();}
 window.triggerPhoto=triggerPhoto;
 
 async function handlePhoto(event){
 const file=event.target.files[0];if(!file)return;
 event.target.value="";
-
 const base64=await new Promise(res=>{
 const r=new FileReader();
 r.onload=e=>res(e.target.result.split(",")[1]);
 r.readAsDataURL(file);
 });
-
 const overlay=document.getElementById("scan-overlay");
 const status=document.getElementById("scan-status");
 overlay.style.display="flex";
 status.textContent="🤖 Gemini analyse votre cahier...";
-
 const productList=getProducts().map(p=>`- "${p.name}" (id:${p.id}, revient:${p.costPrice}F, stock:${p.stock})`).join("\n");
-
 const prompt=`Tu es un assistant expert en lecture de rapports de vente manuscrits pour une boutique de vape.
 
 Produits disponibles dans la boutique:
@@ -763,7 +746,6 @@ Pour chaque vente identifiée, retourne:
 
 Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans backticks, sans explication:
 {"ventes":[{"productId":1,"productName":"Elf Bar 600","qty":2,"price":3500,"type":"detail","isGift":false}],"notes":""}`;
-
 try{
 const resp=await fetch(GEMINI_URL,{
 method:"POST",
@@ -776,33 +758,24 @@ contents:[{parts:[
 generationConfig:{temperature:0.1,maxOutputTokens:1024}
 })
 });
-
 overlay.style.display="none";
-
 if(!resp.ok){
 let errMsg=`Erreur Gemini (${resp.status})`;
 try{const e=await resp.json();errMsg=e?.error?.message||errMsg;}catch{}
 alert("❌ "+errMsg);
 return;
 }
-
 const data=await resp.json();
 const text=(data.candidates?.[0]?.content?.parts||[]).map(p=>p.text||"").join("").trim();
-
 if(!text){alert("❌ Gemini n'a pas retourné de réponse. Réessaie.");return;}
-
-// Nettoyer le JSON (enlever éventuels backticks)
 const clean=text.replace(/```json[\s\S]*?```|```[\s\S]*?```/g,m=>m.replace(/```json|```/g,"")).trim();
-
 let parsed;
 try{parsed=JSON.parse(clean);}
 catch(e){
-// Tentative d'extraction JSON depuis le texte
 const match=clean.match(/\{[\s\S]*\}/);
 if(match){try{parsed=JSON.parse(match[0]);}catch{}}
 if(!parsed){alert("❌ L'IA n'a pas pu analyser la photo. Assure-toi que le cahier est bien visible et réessaie.");return;}
 }
-
 if(parsed.ventes&&parsed.ventes.length>0){
 currentRapport.ventes=parsed.ventes.map(v=>({
 id:Date.now()+Math.random(),
@@ -829,7 +802,6 @@ alert("❌ Erreur réseau: "+err.message);
 }
 window.handlePhoto=handlePhoto;
 
-// ── RAPPORT DETAIL ─────────────────────────────────────────────────────────────
 function rapportDetailHtml(r){
 if(r.source==="zero"||!r.ventes||r.ventes.length===0)return`<div style="text-align:center;padding:24px 0"><div style="font-size:40px;margin-bottom:10px">🏖</div><div style="font-weight:800;font-size:15px;margin-bottom:6px">Journée sans vente</div><div style="color:var(--muted);font-size:12px">Aucune transaction ce jour.</div></div>`;
 const gros=r.ventes.filter(v=>v.type==="gros"),det=r.ventes.filter(v=>v.type==="detail"),gifts=r.ventes.filter(v=>v.isGift);
@@ -854,7 +826,6 @@ openModal("modal-rapport-detail");
 }
 window.openRapportDetail=openRapportDetail;
 
-// ── EDIT RAPPORT ───────────────────────────────────────────────────────────────
 function openEditRapport(key){
 const r=getRapports().find(r=>r._key===key);if(!r)return;
 editingRapportId=key;editVentes=(r.ventes||[]).map(v=>({...v,id:v.id||Date.now()+Math.random()}));
@@ -895,7 +866,6 @@ closeModal("modal-edit-rapport");alert("✅ Rapport modifié !");render();
 }
 window.saveEditRapport=saveEditRapport;
 
-// ── MONTH STATS ────────────────────────────────────────────────────────────────
 function monthStats(key){
 const ms=getSales().filter(s=>s.date&&s.date.startsWith(key));
 const g=ms.filter(s=>s.type==="gros"),d=ms.filter(s=>s.type==="detail");
@@ -909,7 +879,6 @@ return`<div class="month-card"><div class="month-card-head"><span class="month-c
 
 function calcCapital(){return getProducts().reduce((a,p)=>a+(p.stock*p.costPrice),0);}
 
-// ── DEPOTS ─────────────────────────────────────────────────────────────────────
 let fbDepots={};
 function initDepotListener(){
 onValue(ref(db,"depots"),(snap)=>{fbDepots=snap.val()||{};if(role&&currentTab==="depots")renderDepots();});
@@ -986,7 +955,6 @@ const date=document.getElementById("dv-date").value;
 const qtyDispo=d.qtyDeposited-d.qtySold-d.qtyReturned;
 if(!qty||qty>qtyDispo)return alert(`Quantité invalide (max: ${qtyDispo})`);
 if(!montant)return alert("Montant obligatoire");
-const costTotal=qty*(d.prixEstime?d.prixEstime-((d.prixEstime||0)*0.3):0);
 const versements=[...(d.versements||[]),{date,qtySold:qty,montant}];
 const newQtySold=d.qtySold+qty;
 const newStatus=(d.qtyDeposited-newQtySold-d.qtyReturned)<=0?"closed":d.status;
@@ -1049,7 +1017,6 @@ openModal("modal-add-depot");
 }
 window.openAddDepot=openAddDepot;
 
-// ── DEPENSES ───────────────────────────────────────────────────────────────────
 let fbDepenses={};
 function initDepensesListener(){
 onValue(ref(db,"depenses"),(snap)=>{fbDepenses=snap.val()||{};if(role&&currentTab==="depenses")renderDepenses();});
@@ -1150,7 +1117,6 @@ openModal("modal-add-depenses");
 }
 window.openAddDepenses=openAddDepenses;
 
-// ── RENDER MAIN ────────────────────────────────────────────────────────────────
 function renderRapport(){
 const el=document.getElementById("content");
 if(rapportMode==="choose"){
@@ -1196,7 +1162,6 @@ el.innerHTML=`<div style="font-weight:800;font-size:16px;margin-bottom:14px">�
 }
 }
 
-// ── INIT ───────────────────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", function() {
   try {
     initFirebase();
