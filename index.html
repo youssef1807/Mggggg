@@ -1657,7 +1657,7 @@ ${totalSolde>0?`<div style="font-size:10px;color:var(--muted);margin-top:4px;fon
 return`<div class="depense-card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
 <span style="font-weight:800;font-size:13px">${label}</span>
 <div style="display:flex;gap:6px">
-${dep?`<button class="btn btn-ghost btn-sm" onclick="openEditDepenses('${mk}')">✎ Modifier</button>`:`<button class="btn btn-red btn-sm" onclick="document.getElementById('dep-mois').value='${mk}';document.getElementById('dep-lignes').innerHTML='';addDepenseLigne();openModal('modal-add-depenses')">+ Dépense</button>`}
+${dep?`<div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="openEditDepenses('${mk}')">✎ Modifier</button></div>`:`<button class="btn btn-red btn-sm" onclick="document.getElementById('dep-mois').value='${mk}';document.getElementById('dep-lignes').innerHTML='';addDepenseLigne();openModal('modal-add-depenses')">+ Dépense</button>`}
 </div>
 </div>
 ${dep?`${dep.lignes.map(l=>`<div class="depense-row"><span class="depense-cat">${l.cat}</span><span class="depense-montant">-${cfa(l.montant)}</span></div>`).join("")}
