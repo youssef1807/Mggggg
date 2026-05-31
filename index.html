@@ -360,15 +360,16 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Syne',
 <div class="overlay" id="modal-add-depenses" style="display:none">
 <div class="sheet">
 <div class="sheet-handle"></div>
-<div class="sheet-header"><span class="sheet-title">💸 Dépenses du mois</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-add-depenses')">✕</button></div>
+<div class="sheet-header"><span class="sheet-title">💸 Nouvelle dépense</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-add-depenses')">✕</button></div>
 <div class="sheet-body">
-<div class="field"><label>Mois concerné</label><input type="month" id="dep-mois"/></div>
-<div id="dep-lignes" style="display:flex;flex-direction:column;gap:10px;margin-top:4px"></div>
-<button class="btn btn-ghost btn-sm btn-full" onclick="addDepenseLigne()" style="margin-top:4px">+ Ajouter une dépense</button>
+<div class="field"><label>Date</label><input type="date" id="dep-date"/></div>
+<div class="field"><label>Catégorie</label><input type="text" id="dep-cat" placeholder="ex: Loyer, Transport, Électricité..."/></div>
+<div class="field"><label>Montant (F CFA)</label><input type="number" id="dep-montant" placeholder="ex: 25000" min="0"/></div>
+<div class="field"><label>Note (optionnel)</label><input type="text" id="dep-note" placeholder="ex: Facture électricité mai"/></div>
 </div>
 <div class="sheet-footer">
 <button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-add-depenses')">Annuler</button>
-<button class="btn btn-red" style="flex:2" onclick="saveDepenses()">💾 Enregistrer</button>
+<button class="btn btn-red" style="flex:2" onclick="saveDepense()">💾 Enregistrer</button>
 </div>
 </div>
 </div>
@@ -376,10 +377,13 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Syne',
 <div class="overlay" id="modal-edit-depenses" style="display:none">
 <div class="sheet">
 <div class="sheet-handle"></div>
-<div class="sheet-header"><span class="sheet-title" id="med-title">✎ Modifier dépenses</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-edit-depenses')">✕</button></div>
+<div class="sheet-header"><span class="sheet-title" id="med-title">✎ Modifier dépense</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-edit-depenses')">✕</button></div>
 <div class="sheet-body">
-<div id="med-lignes" style="display:flex;flex-direction:column;gap:10px"></div>
-<button class="btn btn-ghost btn-sm btn-full" onclick="addEditDepenseLigne()" style="margin-top:4px">+ Ajouter une dépense</button>
+<div id="med-lignes" data-key=""></div>
+<div class="field"><label>Date</label><input type="date" id="med-date"/></div>
+<div class="field"><label>Catégorie</label><input type="text" id="med-cat" placeholder="ex: Loyer..."/></div>
+<div class="field"><label>Montant (F CFA)</label><input type="number" id="med-montant" min="0"/></div>
+<div class="field"><label>Note (optionnel)</label><input type="text" id="med-note"/></div>
 </div>
 <div class="sheet-footer">
 <button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-edit-depenses')">Annuler</button>
@@ -1536,6 +1540,7 @@ onValue(ref(db,"depenses"),(snap)=>{fbDepenses=snap.val()||{};if(role&&currentTa
 }
 const getDepenses=()=>toArr(fbDepenses);
 const getDepensesForMonth=mk=>getDepenses().find(d=>d.mois===mk);
+const getDepensesForMonthAll=mk=>getDepenses().filter(d=>d.mois===mk);
 
 function addDepenseLigne(){
 const c=document.getElementById("dep-lignes");
@@ -1546,23 +1551,22 @@ c.appendChild(div);
 }
 window.addDepenseLigne=addDepenseLigne;
 
-async function saveDepenses(){
-const mois=document.getElementById("dep-mois").value;
-if(!mois)return alert("Sélectionne un mois !");
-const lignes=[];
-document.getElementById("dep-lignes").querySelectorAll(".grid2").forEach(row=>{
-const inputs=row.querySelectorAll("input");
-const cat=inputs[0].value.trim();const montant=+inputs[1].value;
-if(cat&&montant>0)lignes.push({cat,montant});
-});
-if(!lignes.length)return alert("Ajoute au moins une dépense !");
-const total=lignes.reduce((a,l)=>a+l.montant,0);
-const existing=getDepensesForMonth(mois);
-if(existing){await set(ref(db,`depenses/${existing._key}`),{...existing,lignes,total});}
-else{const k=push(ref(db,"depenses")).key;await set(ref(db,`depenses/${k}`),{_key:k,mois,lignes,total});}
-closeModal("modal-add-depenses");alert("✅ Dépenses enregistrées !");
+async function saveDepense(){
+const date=document.getElementById("dep-date").value;
+const cat=document.getElementById("dep-cat").value.trim();
+const montant=+document.getElementById("dep-montant").value;
+const note=document.getElementById("dep-note").value.trim();
+if(!date||!cat||!montant)return alert("Date, catégorie et montant obligatoires !");
+const k=push(ref(db,"depenses")).key;
+const mois=date.slice(0,7);
+await set(ref(db,"depenses/"+k),{_key:k,date,mois,cat,montant,note});
+closeModal("modal-add-depenses");
+alert("✅ Dépense enregistrée !");
 render();
 }
+window.saveDepense=saveDepense;
+
+async function saveDepenses(){await saveDepense();}
 window.saveDepenses=saveDepenses;
 
 function addEditDepenseLigne(){
@@ -1574,35 +1578,40 @@ c.appendChild(div);
 }
 window.addEditDepenseLigne=addEditDepenseLigne;
 
-function openEditDepenses(mois){
-const d=getDepensesForMonth(mois);if(!d)return;
-document.getElementById("med-title").textContent=`✎ Dépenses ${mois}`;
-const c=document.getElementById("med-lignes");c.innerHTML="";
-(d.lignes||[]).forEach(l=>{
-const div=document.createElement("div");div.className="grid2";div.style.gap="8px";div.style.alignItems="flex-end";
-div.innerHTML=`<div class="field"><label>Catégorie</label><input type="text" value="${l.cat}"/></div><div class="field" style="display:flex;gap:6px;align-items:flex-end"><div style="flex:1"><label>Montant (F)</label><input type="number" value="${l.montant}" min="0"/></div><button onclick="this.closest('.grid2').remove()" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:8px 10px;font-size:13px;cursor:pointer;flex-shrink:0">✕</button></div>`;
-c.appendChild(div);
-});
-document.getElementById("med-lignes").dataset.mois=mois;
+function openEditDepenses(key){
+const deps=getDepenses();
+const d=deps.find(x=>x._key===key);if(!d)return;
+document.getElementById("med-title").textContent="✎ Modifier dépense";
+document.getElementById("med-date").value=d.date||((d.mois||today().slice(0,7))+"-15");
+document.getElementById("med-cat").value=d.cat||"";
+document.getElementById("med-montant").value=d.montant||0;
+document.getElementById("med-note").value=d.note||"";
+document.getElementById("med-lignes").dataset.key=key;
 openModal("modal-edit-depenses");
 }
 window.openEditDepenses=openEditDepenses;
 
 async function saveEditDepenses(){
-const mois=document.getElementById("med-lignes").dataset.mois;
-const lignes=[];
-document.getElementById("med-lignes").querySelectorAll(".grid2").forEach(row=>{
-const inputs=row.querySelectorAll("input");
-const cat=inputs[0].value.trim();const montant=+inputs[1].value;
-if(cat&&montant>0)lignes.push({cat,montant});
-});
-const total=lignes.reduce((a,l)=>a+l.montant,0);
-const existing=getDepensesForMonth(mois);
-if(existing){await set(ref(db,`depenses/${existing._key}`),{...existing,lignes,total});}
-closeModal("modal-edit-depenses");alert("✅ Dépenses modifiées !");
+const key=document.getElementById("med-lignes").dataset.key;
+const date=document.getElementById("med-date").value;
+const cat=document.getElementById("med-cat").value.trim();
+const montant=+document.getElementById("med-montant").value;
+const note=document.getElementById("med-note").value.trim();
+if(!date||!cat||!montant)return alert("Date, catégorie et montant obligatoires !");
+const mois=date.slice(0,7);
+await set(ref(db,"depenses/"+key),{_key:key,date,mois,cat,montant,note});
+closeModal("modal-edit-depenses");alert("✅ Dépense modifiée !");
 render();
 }
 window.saveEditDepenses=saveEditDepenses;
+
+async function deleteDepense(key){
+if(!confirm("Supprimer cette dépense ?"))return;
+await remove(ref(db,"depenses/"+key));
+alert("✅ Dépense supprimée !");
+render();
+}
+window.deleteDepense=deleteDepense;
 
 function renderDepenses(){
 const el=document.getElementById("content");if(!el)return;
@@ -1610,13 +1619,14 @@ const d=new Date();const mk=nowMK();
 // Build list of all months that have data + current month
 const allMonthsWithData=new Set();
 allMonthsWithData.add(mk); // always show current month
-toArr(fbDepenses).forEach(dep=>{if(dep.mois)allMonthsWithData.add(dep.mois);});
+getDepenses().forEach(dep=>{if(dep.mois)allMonthsWithData.add(dep.mois);else if(dep.date)allMonthsWithData.add(dep.date.slice(0,7));});
 getRetraits().forEach(r=>{if(r.mois)allMonthsWithData.add(r.mois);});
 getRapports().forEach(r=>{if(r.date)allMonthsWithData.add(r.date.slice(0,7));});
 const moisList=Array.from(allMonthsWithData).sort((a,b)=>b.localeCompare(a));
 // Show current month always, others only if they have data
 const moisCards=moisList.map(mk=>{
-const dep=getDepensesForMonth(mk);
+const depList=getDepensesForMonthAll(mk);
+const dep=depList.length>0?{lignes:depList.map(d=>({cat:d.cat,montant:d.montant})),total:depList.reduce((a,d)=>a+(+d.montant||0),0)}:null;
 const ms=monthStats(mk);
 const [y,m]=mk.split("-");
 const label=`${MONTHS_FULL[+m-1]} ${y}`;
@@ -1657,10 +1667,10 @@ ${totalSolde>0?`<div style="font-size:10px;color:var(--muted);margin-top:4px;fon
 return`<div class="depense-card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
 <span style="font-weight:800;font-size:13px">${label}</span>
 <div style="display:flex;gap:6px">
-${dep?`<div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="openEditDepenses('${mk}')">✎ Modifier</button></div>`:`<button class="btn btn-red btn-sm" onclick="document.getElementById('dep-mois').value='${mk}';document.getElementById('dep-lignes').innerHTML='';addDepenseLigne();openModal('modal-add-depenses')">+ Dépense</button>`}
+<button class="btn btn-red btn-sm" onclick="openAddDepenses('${mk+'-15'}')">+ Dépense</button>
 </div>
 </div>
-${dep?`${dep.lignes.map(l=>`<div class="depense-row"><span class="depense-cat">${l.cat}</span><span class="depense-montant">-${cfa(l.montant)}</span></div>`).join("")}
+${depList.length>0?`${depList.sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(d=>`<div class="depense-row" style="align-items:center"><div style="flex:1"><span class="depense-cat">${d.cat}</span>${d.note?`<div style="font-size:10px;color:var(--muted)">${d.note}</div>`:""}<div style="font-size:10px;color:var(--muted)">${d.date||d.mois}</div></div><div style="display:flex;align-items:center;gap:6px"><span class="depense-montant">-${cfa(d.montant)}</span><button onclick="openEditDepenses('${d._key}')" style="background:#3b82f622;border:1px solid #3b82f644;color:var(--blue);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✎</button><button onclick="deleteDepense('${d._key}')" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button></div></div>`).join("")}
 <div class="bilan-total" style="padding-top:8px;padding-bottom:8px;border-bottom:1px solid var(--border)"><span class="bilan-total-label" style="font-size:12px">Total dépenses</span><span style="font-family:monospace;font-weight:800;font-size:14px;color:var(--red)">-${cfa(dep.total)}</span></div>`:`<div style="color:var(--muted);font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)">Aucune dépense ce mois</div>`}
 <div style="margin-top:10px">${retraitsSection}</div>
 <div style="background:var(--bg);border-radius:9px;padding:10px 12px;margin-top:8px">
@@ -1675,10 +1685,11 @@ el.innerHTML=`<div class="sec-head"><span class="sec-title">💸 Dépenses</span
 ${moisCards||`<div class="empty">Aucune donnée pour les 6 derniers mois.</div>`}`;
 }
 
-function openAddDepenses(){
-document.getElementById("dep-mois").value=nowMK();
-document.getElementById("dep-lignes").innerHTML="";
-addDepenseLigne();
+function openAddDepenses(prefillDate){
+document.getElementById("dep-date").value=prefillDate||today();
+document.getElementById("dep-cat").value="";
+document.getElementById("dep-montant").value="";
+document.getElementById("dep-note").value="";
 openModal("modal-add-depenses");
 }
 window.openAddDepenses=openAddDepenses;
@@ -1809,15 +1820,20 @@ getCredits().forEach(c=>{
   });
 });
 
-// Dépenses
+// Dépenses (chaque entrée est indépendante)
 const depenses=toArr(fbDepenses);
 depenses.forEach(d=>{
-  if(!d.mois)return;
-  const dateRef=d.date||d.mois+"-15";
-  (d.lignes||[]).forEach(l=>{
-    if(!l.cat||!l.montant)return;
-    addEntry(dateRef,"💸 "+(l.cat||"Dépense"),-l.montant,"depense");
-  });
+  const dateRef=d.date||(d.mois?d.mois+"-15":today());
+  if(d.cat&&d.montant){
+    // New format: independent entry
+    addEntry(dateRef,"💸 "+(d.cat||"Dépense"),-d.montant,"depense");
+  } else if(d.lignes){
+    // Old format: multiple lignes in one entry (backward compat)
+    (d.lignes||[]).forEach(l=>{
+      if(!l.cat||!l.montant)return;
+      addEntry(dateRef,"💸 "+(l.cat||"Dépense"),-l.montant,"depense");
+    });
+  }
 });
 // Retraits associés dans caisse
 getRetraits().forEach(r=>{
@@ -2818,7 +2834,8 @@ if(currentTab==="dashboard"){
 const m=monthStats(mk),totalB=getSales().reduce((a,s)=>a+s.profit,0),low=getProducts().filter(p=>p.stock<=5);
 const capital=calcCapital();
 const capitalEngage=getCommandes().filter(c=>c.status==="en_attente").reduce((a,c)=>a+(+c.totalMontant||0),0);
-const depMoisDash=getDepensesForMonth(mk);
+const depListDash=getDepensesForMonthAll(mk);
+const depMoisDash=depListDash.length>0?{total:depListDash.reduce((a,d)=>a+(+d.montant||0),0)}:null;
 const retraitsMoisDash=getTotalRetraitsAllMois(mk);
 const retraitsHadiDash=getTotalRetraitsMois(mk,"Hadi");
 const retraitsYoussefDash=getTotalRetraitsMois(mk,"Youssef");
@@ -2846,7 +2863,7 @@ el.innerHTML=`<div class="sec-head"><span class="sec-title">📦 Produits</span>
 else if(currentTab==="stats"){
 const allStatMonths=new Set();
 getRapports().forEach(r=>{if(r.date)allStatMonths.add(r.date.slice(0,7));});
-toArr(fbDepenses).forEach(dep=>{if(dep.mois)allStatMonths.add(dep.mois);});
+getDepenses().forEach(dep=>{if(dep.mois)allStatMonths.add(dep.mois);else if(dep.date)allStatMonths.add(dep.date.slice(0,7));});
 getRetraits().forEach(r=>{if(r.mois)allStatMonths.add(r.mois);});
 allStatMonths.add(nowMK());
 const sortedStatMonths=Array.from(allStatMonths).sort((a,b)=>b.localeCompare(a));
