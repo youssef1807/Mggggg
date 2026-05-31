@@ -216,6 +216,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Syne',
 <div class="hdr-title">💨 VapeTracker <span id="role-badge" class="role-badge"></span></div>
 <div class="hdr-right">
 <button class="btn btn-amber btn-sm" id="btn-stock" onclick="openModal('modal-stock-in')" style="display:none">+ Stock</button>
+<button class="btn btn-ghost btn-sm" id="btn-undo" onclick="openUndoConfirm()" style="display:none;font-size:15px" title="Annuler dernière action">↩</button>
 <button class="btn btn-ghost btn-sm" onclick="logout()">🚪</button>
 <button class="btn btn-ghost btn-sm" id="btn-reset" onclick="openResetMenu()" style="display:none;color:var(--red);font-size:16px" title="Paramètres">⚙️</button>
 </div>
@@ -419,6 +420,7 @@ const set=(r,val)=>r.set(val);
 const push=(r)=>r.push();
 const remove=(r)=>r.remove();
 const update=(r,val)=>r.update(val);
+const get=(r)=>r.once("value");
 const onValue=(r,cb)=>r.on("value",snap=>cb(snap));
 
 const firebaseConfig={
@@ -482,6 +484,10 @@ initCaisseCreditsListeners();
 initRetraitsListener();
 initCommandesListener();
 onValue(ref(db,".info/connected"),(snap)=>{setSyncStatus(snap.val()?"online":"offline");});
+onValue(ref(db,"undo_snapshot"),(snap)=>{
+  const btn=document.getElementById("btn-undo");
+  if(btn&&role==="admin")btn.style.display=snap.val()?"inline-flex":"none";
+});
 }catch(e){
 console.warn("Firebase error:", e.message);
 fbLoaded=true;setSyncStatus("offline");
@@ -503,6 +509,96 @@ function fbAddSale(s){const k=push(ref(db,"sales")).key;return set(ref(db,`sales
 function fbAddRapport(r){const k=push(ref(db,"rapports")).key;return set(ref(db,`rapports/${k}`),{...r,_key:k});}
 function fbUpdateRapport(key,r){return set(ref(db,`rapports/${key}`),r);}
 function fbAddMove(m){const k=push(ref(db,"moves")).key;return set(ref(db,`moves/${k}`),{...m,_key:k});}
+
+async function saveUndoSnapshot(actionLabel){
+try{
+const snapshot={
+  label:actionLabel,
+  date:new Date().toISOString(),
+  products:fbProducts||{},
+  sales:fbSales||{},
+  rapports:fbRapports||{},
+  moves:fbMoves||{},
+  credits:fbCredits||{},
+  depots:fbDepots||{},
+  retraits:fbRetraits||{},
+  depenses:fbDepenses||{},
+  caisseConfig:fbCaisseConfig||{},
+  commandes:fbCommandes||{},
+};
+await set(ref(db,"undo_snapshot"),snapshot);
+}catch(e){console.warn("Undo snapshot error:",e.message);}
+}
+
+function openUndoConfirm(){
+// Get snapshot info
+const snap=window._lastUndoLabel||"dernière action";
+const html=`<div class="overlay" id="modal-undo" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">↩ Annuler l'action</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-undo');document.getElementById('modal-undo').remove()">✕</button></div>
+<div class="sheet-body">
+<div style="background:#f59e0b14;border:1px solid #f59e0b33;border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;color:var(--amber)">
+⚠️ Cette action va restaurer l'état <b>avant la dernière modification</b>. Toutes les données seront remises comme avant.
+</div>
+<div id="undo-snap-info" style="background:var(--bg);border-radius:9px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--muted)">Chargement...</div>
+<div class="field"><label>🔐 Mot de passe Admin pour confirmer</label><input type="password" id="undo-pw" placeholder="••••••••" style="letter-spacing:3px" onkeydown="if(event.key==='Enter')doRestoreUndo()"/></div>
+<div id="undo-err" style="color:var(--red);font-size:12px;font-weight:700;min-height:16px;text-align:center"></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-undo');document.getElementById('modal-undo').remove()">Annuler</button>
+<button class="btn btn-amber" style="flex:2" onclick="doRestoreUndo()">↩ Restaurer</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+// Load snapshot info
+get(ref(db,"undo_snapshot")).then(snap=>{
+  const info=document.getElementById("undo-snap-info");
+  if(!info)return;
+  if(snap.val()){
+    const d=new Date(snap.val().date);
+    const time=d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
+    const date=d.toLocaleDateString("fr-FR");
+    info.innerHTML=`<b>Action :</b> ${snap.val().label||"Modification"}<br><b>Heure :</b> ${time} le ${date}`;
+  }else{
+    info.textContent="Aucune action à annuler.";
+  }
+});
+}
+window.openUndoConfirm=openUndoConfirm;
+
+async function doRestoreUndo(){
+const pw=document.getElementById("undo-pw").value;
+const err=document.getElementById("undo-err");
+if(pw!==PW_ADMIN){err.textContent="❌ Mot de passe incorrect !";return;}
+try{
+  const snap=await get(ref(db,"undo_snapshot"));
+  if(!snap.val()){alert("Aucun snapshot à restaurer.");return;}
+  const s=snap.val();
+  if(!confirm("Confirmer la restauration ?\n⚠️ Toutes les données actuelles seront remplacées."))return;
+  // Restore all collections
+  await set(ref(db,"products"),s.products||{});
+  await set(ref(db,"sales"),s.sales||{});
+  await set(ref(db,"rapports"),s.rapports||{});
+  await set(ref(db,"moves"),s.moves||{});
+  await set(ref(db,"credits"),s.credits||{});
+  await set(ref(db,"depots"),s.depots||{});
+  await set(ref(db,"retraits"),s.retraits||{});
+  await set(ref(db,"depenses"),s.depenses||{});
+  await set(ref(db,"caisseConfig"),s.caisseConfig||{});
+  await set(ref(db,"commandes"),s.commandes||{});
+  // Clear snapshot so button disappears
+  await remove(ref(db,"undo_snapshot"));
+  closeModal("modal-undo");
+  document.getElementById("modal-undo")?.remove();
+  alert("✅ Restauration effectuée !");
+  render();
+}catch(e){
+  document.getElementById("undo-err").textContent="❌ Erreur: "+e.message;
+}
+}
+window.doRestoreUndo=doRestoreUndo;
 function fbRemoveSalesByDate(date){
 const toDelete=getSales().filter(s=>s.date===date);
 return Promise.all(toDelete.map(s=>remove(ref(db,`sales/${s._key}`))));
@@ -564,6 +660,8 @@ document.getElementById("nav-commandes").style.display=role==="admin"?"flex":"no
 document.getElementById("nav-credits").style.display="flex";
 document.getElementById("btn-stock").style.display=role==="admin"?"inline-flex":"none";
 document.getElementById("btn-reset").style.display=role==="admin"?"inline-flex":"none";
+// undo btn visibility handled by Firebase listener, but init hide for non-admin
+if(role!=="admin"){const u=document.getElementById("btn-undo");if(u)u.style.display="none";}
 currentTab=role==="admin"?"dashboard":"rapport";
 rapportMode="choose";
 document.querySelectorAll(".nav-btn").forEach(b=>b.classList.remove("active"));
@@ -658,6 +756,7 @@ closeModal("modal-edit-prod");
 window.saveEditProduct=saveEditProduct;
 
 async function deleteProduct(id){
+await saveUndoSnapshot("Supprimer produit");
 if(!confirm("Supprimer ce produit ?"))return;
 await fbDeleteProduct(id);
 }
@@ -787,6 +886,7 @@ if(!v.qty||v.qty<=0)return alert("Quantité invalide.");
 const p=getP(v.productId);
 if(v.qty>p.stock)return alert(`Stock insuffisant pour ${p.name} (stock: ${p.stock})`);
 }
+await saveUndoSnapshot("Rapport du "+dateLabel(rapportDate));
 if(!confirm("Valider le rapport du "+dateLabel(rapportDate)+" ?"))return;
 const dateStr=rapportDate;
 // Traiter les réapprovisionnements dépôt
@@ -841,6 +941,7 @@ alert(msg);render();
 window.validerRapport=validerRapport;
 
 async function validerJourneeVide(){
+await saveUndoSnapshot("Journée vide: "+dateLabel(rapportDate));
 if(!confirm("Confirmer : aucune vente le "+dateLabel(rapportDate)+" ?"))return;
 await fbAddRapport({date:rapportDate,ventes:[],totals:{benefGros:0,benefDetail:0,perteCadeaux:0,totalProfit:0,totalCA:0,nbCadeaux:0,nbVentes:0},source:"zero"});
 rapportMode="choose";
@@ -1022,6 +1123,7 @@ window.updateEditVente=updateEditVente;
 async function saveEditRapport(){
 const r=getRapports().find(r=>r._key===editingRapportId);if(!r)return;
 for(const v of editVentes){if(!v.productId)return alert("Sélectionne un produit pour chaque ligne.");}
+await saveUndoSnapshot("Modifier rapport");
 if(!confirm("Sauvegarder les modifications ?"))return;
 for(const v of (r.ventes||[])){const p=getP(v.productId);if(p)await fbSetProduct({...p,stock:p.stock+v.qty});}
 await fbRemoveSalesByDate(r.date);
@@ -1460,7 +1562,8 @@ ${retraitsList.map(r=>`<div style="display:flex;justify-content:space-between;al
 <div><span style="color:var(--muted)">${r.date}</span>${r.note?` · <span style="color:var(--muted)">${r.note}</span>`:""}</div>
 <div style="display:flex;align-items:center;gap:6px">
 <span style="font-family:monospace;color:var(--amber)">-${cfa(r.montant)}</span>
-<button onclick="deleteRetrait('${r._key}')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px">✕</button>
+<button onclick="editRetrait('${r._key}')" style="background:#3b82f622;border:1px solid #3b82f644;color:var(--blue);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✎</button>
+<button onclick="deleteRetrait('${r._key}')" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button>
 </div>
 </div>`).join("")}
 ${retraitsList.length===0?`<div style="font-size:11px;color:var(--muted)">Aucun retrait ce mois</div>`:""}
@@ -1552,6 +1655,7 @@ window.saveRetrait=saveRetrait;
 
 async function deleteRetrait(key){
 const r=getRetraits().find(r=>r._key===key);if(!r)return;
+await saveUndoSnapshot("Supprimer retrait");
 if(!confirm("Supprimer ce retrait de "+cfa(r.montant)+" ?"))return;
 await remove(ref(db,"retraits/"+key));
 // Recréditer la caisse
@@ -1591,16 +1695,15 @@ const soldeDepart=+(fbCaisseConfig.soldeDepart||0);
 
 // Build all cash flow entries grouped by date
 const allDays={};
-const addEntry=(date,label,montant,type)=>{
+const addEntry=(date,label,montant,type,key)=>{
   if(!date)return;
   if(!allDays[date])allDays[date]={entrees:[],sorties:[],notes:[]};
   if(type==="credit_note"){
-    // Shown as info only - not real cash
-    allDays[date].notes.push({label,montant,type});
+    allDays[date].notes.push({label,montant,type,key});
   }else if(montant>0){
-    allDays[date].entrees.push({label,montant,type});
+    allDays[date].entrees.push({label,montant,type,key});
   }else{
-    allDays[date].sorties.push({label,montant:Math.abs(montant),type});
+    allDays[date].sorties.push({label,montant:Math.abs(montant),type,key});
   }
 };
 
@@ -1646,7 +1749,8 @@ getRetraits().forEach(r=>{
 });
 // Apports manuels en caisse
 (toArr(fbCaisseConfig.apports||{})).forEach(a=>{
-  addEntry(a.date,"💵 Apport: "+(a.note||"Manuel"),+a.montant,"apport");
+  const isManual=!a.note||(!a.note.startsWith("📬")&&!a.note.startsWith("🚚")&&!a.note.startsWith("✎")&&!a.note.startsWith("❌")&&!a.note.startsWith("💰 Retrait")&&!a.note.startsWith("↩"));
+  addEntry(a.date,(a.montant>0?"💵 Apport: ":"📤 Sortie: ")+(a.note||"Manuel"),+a.montant,isManual?"apport_manual":"apport",a._key);
 });
 
 const sortedDates=Object.keys(allDays).sort((a,b)=>b.localeCompare(a));
@@ -1663,6 +1767,7 @@ el.innerHTML=`
 <div class="sec-head"><span class="sec-title">🏦 Caisse</span>
 <div style="display:flex;gap:6px">
 <button class="btn btn-green btn-sm" onclick="openApportCaisse()">+ Apport</button>
+<button class="btn btn-red btn-sm" onclick="openRetraitCaisse()">- Retrait</button>
 <button class="btn btn-ghost btn-sm" onclick="setSoldeDepart()">⚙️</button>
 </div>
 </div>
@@ -1692,13 +1797,19 @@ return`<div class="card" style="margin-bottom:10px">
 <span style="font-weight:800;font-size:13px">${dateLabel(date)}</span>
 <span style="font-family:monospace;font-weight:800;font-size:13px;color:${dayNet>=0?"var(--green)":"var(--red)"}">${dayNet>=0?"+":""}${cfa(Math.round(dayNet))}</span>
 </div>
-${day.entrees.map(e=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
-<span style="color:var(--text)">${e.label}</span>
+${day.entrees.map(e=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
+<span style="color:var(--text);flex:1">${e.label}</span>
+<div style="display:flex;align-items:center;gap:6px">
 <span style="font-family:monospace;color:var(--green);font-weight:700">+${cfa(e.montant)}</span>
+${e.type==="apport_manual"&&e.key?`<button onclick="editApport('${e.key}')" style="background:#3b82f622;border:1px solid #3b82f644;color:var(--blue);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✎</button><button onclick="deleteApport('${e.key}')" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button>`:""}
+</div>
 </div>`).join("")}
-${day.sorties.map(s=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
-<span style="color:var(--text)">${s.label}</span>
+${day.sorties.map(s=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
+<span style="color:var(--text);flex:1">${s.label}</span>
+<div style="display:flex;align-items:center;gap:6px">
 <span style="font-family:monospace;color:var(--red);font-weight:700">-${cfa(s.montant)}</span>
+${s.type==="apport_manual"&&s.key?`<button onclick="editApport('${s.key}')" style="background:#3b82f622;border:1px solid #3b82f644;color:var(--blue);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✎</button><button onclick="deleteApport('${s.key}')" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button>`:""}
+</div>
 </div>`).join("")}
 ${(day.notes||[]).map(n=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;opacity:.7">
 <span style="color:var(--muted);font-style:italic">${n.label}</span>
@@ -2096,6 +2207,7 @@ const montant=+document.getElementById("ap-montant").value;
 const date=document.getElementById("ap-date").value;
 const note=document.getElementById("ap-note").value.trim()||"Apport manuel";
 if(!montant||montant<=0)return alert("Montant invalide !");
+await saveUndoSnapshot("Apport caisse");
 const k=push(ref(db,"caisseConfig/apports")).key;
 await set(ref(db,"caisseConfig/apports/"+k),{_key:k,montant,date,note});
 closeModal("modal-apport");
@@ -2104,6 +2216,86 @@ alert("✅ Apport de "+cfa(montant)+" enregistré !");
 render();
 }
 window.saveApport=saveApport;
+
+function openRetraitCaisse(){
+const html=`<div class="overlay" id="modal-retrait-caisse" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">📤 Retrait de caisse</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-retrait-caisse');document.getElementById('modal-retrait-caisse').remove()">✕</button></div>
+<div class="sheet-body">
+<div class="field"><label>Montant à retirer (F CFA)</label><input type="number" id="rc-montant" placeholder="ex: 50000"/></div>
+<div class="field"><label>Date</label><input type="date" id="rc-date" value="${today()}"/></div>
+<div class="field"><label>Note (optionnel)</label><input type="text" id="rc-note" placeholder="ex: Dépense personnelle, achat stock..."/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-retrait-caisse');document.getElementById('modal-retrait-caisse').remove()">Annuler</button>
+<button class="btn btn-red" style="flex:2" onclick="saveRetraitCaisse()">📤 Retirer</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.openRetraitCaisse=openRetraitCaisse;
+
+async function saveRetraitCaisse(){
+const montant=+document.getElementById("rc-montant").value;
+const date=document.getElementById("rc-date").value;
+const note=document.getElementById("rc-note").value.trim()||"Retrait caisse";
+if(!montant||montant<=0)return alert("Montant invalide !");
+await saveUndoSnapshot("Retrait caisse");
+const k=push(ref(db,"caisseConfig/apports")).key;
+await set(ref(db,"caisseConfig/apports/"+k),{_key:k,montant:-montant,date,note});
+closeModal("modal-retrait-caisse");
+document.getElementById("modal-retrait-caisse")?.remove();
+alert("✅ Retrait de "+cfa(montant)+" enregistré !");
+render();
+}
+window.saveRetraitCaisse=saveRetraitCaisse;
+
+async function editApport(key){
+const apports=toArr(fbCaisseConfig.apports||{});
+const a=apports.find(x=>x._key===key);
+if(!a)return;
+const html=`<div class="overlay" id="modal-edit-apport" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">✎ Modifier</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-edit-apport');document.getElementById('modal-edit-apport').remove()">✕</button></div>
+<div class="sheet-body">
+<div class="field"><label>Montant (F CFA) — négatif = sortie</label><input type="number" id="ea-montant" value="${a.montant}"/></div>
+<div class="field"><label>Date</label><input type="date" id="ea-date" value="${a.date||today()}"/></div>
+<div class="field"><label>Note</label><input type="text" id="ea-note" value="${a.note||""}"/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-edit-apport');document.getElementById('modal-edit-apport').remove()">Annuler</button>
+<button class="btn btn-primary" style="flex:2" onclick="saveEditApport('${key}')">✅ Enregistrer</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.editApport=editApport;
+
+async function saveEditApport(key){
+const montant=+document.getElementById("ea-montant").value;
+const date=document.getElementById("ea-date").value;
+const note=document.getElementById("ea-note").value.trim();
+if(isNaN(montant)||montant===0)return alert("Montant invalide !");
+await set(ref(db,"caisseConfig/apports/"+key),{_key:key,montant,date,note});
+closeModal("modal-edit-apport");
+document.getElementById("modal-edit-apport")?.remove();
+alert("✅ Modifié !");
+render();
+}
+window.saveEditApport=saveEditApport;
+
+async function deleteApport(key){
+await saveUndoSnapshot("Supprimer entrée caisse");
+if(!confirm("Supprimer cette entrée ?"))return;
+await remove(ref(db,"caisseConfig/apports/"+key));
+alert("✅ Supprimé !");
+render();
+}
+window.deleteApport=deleteApport;
 
 function toggleMoreMenu(){
 const m=document.getElementById("more-menu");
@@ -2223,16 +2415,22 @@ ${tag(solde?"✅ Soldé":"⏳ En cours",solde?"green":"red")}
 </div>
 ${!solde?`<div style="display:flex;gap:6px">
 <button class="btn btn-green btn-sm" style="flex:2" onclick="openRemboursement('${c._key}')">💰 Remboursement</button>
-<button class="btn btn-ghost btn-sm" style="flex:1" onclick="deleteCredit('${c._key}')">✕</button>
-</div>`:`<button class="btn btn-ghost btn-sm btn-full" onclick="deleteCredit('${c._key}')">Supprimer</button>`}
+<button class="btn btn-ghost btn-sm" onclick="editCredit('${c._key}')">✎</button>
+<button class="btn btn-ghost btn-sm" onclick="deleteCredit('${c._key}')">✕</button>
+</div>`:`<div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" style="flex:1" onclick="editCredit('${c._key}')">✎ Modifier</button><button class="btn btn-ghost btn-sm btn-full" style="flex:1" onclick="deleteCredit('${c._key}')">✕ Supprimer</button></div>`}
 ${((c.historique||[]).length||(c.remboursements||[]).length)?`<div style="margin-top:10px">
 <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">📋 Historique</div>
 ${(c.historique||[]).map(h=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
 <div><span style="color:var(--muted)">${h.date}</span><div style="font-size:10px;color:var(--muted)">${h.note||""}</div></div>
 <span style="font-family:monospace;color:var(--red)">+${cfa(h.montant)}</span>
 </div>`).join("")}
-${(c.remboursements||[]).map(r=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
-<span style="color:var(--muted)">${r.date} · Remb.</span><span style="font-family:monospace;color:var(--green)">-${cfa(r.montant)}</span>
+${(c.remboursements||[]).map((r,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
+<span style="color:var(--muted)">${r.date} · Remb.</span>
+<div style="display:flex;align-items:center;gap:6px">
+<span style="font-family:monospace;color:var(--green)">-${cfa(r.montant)}</span>
+<button onclick="editRemboursement('${c._key}',${i})" style="background:#3b82f622;border:1px solid #3b82f644;color:var(--blue);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✎</button>
+<button onclick="deleteRemboursement('${c._key}',${i})" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button>
+</div>
 </div>`).join("")}
 </div>`:""}
 </div>`;
@@ -2304,6 +2502,7 @@ const montant=+document.getElementById("remb-montant").value;
 const date=document.getElementById("remb-date").value;
 if(!montant||montant<=0)return alert("Montant invalide !");
 if(montant>(+c.montantRestant||0))return alert("Montant dépasse le reste dû ("+cfa(c.montantRestant)+")");
+await saveUndoSnapshot("Remboursement crédit");
 const remboursements=[...(c.remboursements||[]),{date,montant}];
 const newRestant=(+c.montantRestant||0)-montant;
 const newStatus=newRestant<=0?"soldé":"en cours";
@@ -2316,11 +2515,150 @@ render();
 window.saveRemboursement=saveRemboursement;
 
 async function deleteCredit(key){
+await saveUndoSnapshot("Supprimer crédit");
 if(!confirm("Supprimer ce crédit ?"))return;
 await remove(ref(db,"credits/"+key));
 render();
 }
 window.deleteCredit=deleteCredit;
+
+function editCredit(key){
+const c=getCredits().find(x=>x._key===key);if(!c)return;
+const html=`<div class="overlay" id="modal-edit-credit" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">✎ Modifier crédit</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-edit-credit');document.getElementById('modal-edit-credit').remove()">✕</button></div>
+<div class="sheet-body">
+<div class="field"><label>Nom du client</label><input type="text" id="ec-client" value="${c.client||''}"/></div>
+<div class="field"><label>Montant initial (F CFA)</label><input type="number" id="ec-montant" value="${c.montantInitial||0}"/></div>
+<div class="field"><label>Montant restant (F CFA)</label><input type="number" id="ec-restant" value="${c.montantRestant||0}"/></div>
+<div class="field"><label>Date</label><input type="date" id="ec-date" value="${c.date||today()}"/></div>
+<div class="field"><label>Note</label><input type="text" id="ec-note" value="${c.note||''}"/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-edit-credit');document.getElementById('modal-edit-credit').remove()">Annuler</button>
+<button class="btn btn-primary" style="flex:2" onclick="saveEditCredit('${key}')">✅ Enregistrer</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.editCredit=editCredit;
+
+async function saveEditCredit(key){
+const c=getCredits().find(x=>x._key===key);if(!c)return;
+const client=document.getElementById("ec-client").value.trim();
+const montantInitial=+document.getElementById("ec-montant").value;
+const montantRestant=+document.getElementById("ec-restant").value;
+const date=document.getElementById("ec-date").value;
+const note=document.getElementById("ec-note").value.trim();
+if(!client)return alert("Nom obligatoire !");
+await saveUndoSnapshot("Modifier crédit");
+const newStatus=montantRestant<=0?"soldé":"en cours";
+await set(ref(db,"credits/"+key),{...c,client,montantInitial,montantRestant,date,note,status:newStatus});
+closeModal("modal-edit-credit");
+document.getElementById("modal-edit-credit")?.remove();
+alert("✅ Crédit modifié !");
+render();
+}
+window.saveEditCredit=saveEditCredit;
+
+function editRemboursement(creditKey,idx){
+const c=getCredits().find(x=>x._key===creditKey);if(!c)return;
+const r=(c.remboursements||[])[idx];if(!r)return;
+const html=`<div class="overlay" id="modal-edit-remb" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">✎ Modifier remboursement</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-edit-remb');document.getElementById('modal-edit-remb').remove()">✕</button></div>
+<div class="sheet-body">
+<div class="field"><label>Montant (F CFA)</label><input type="number" id="er-montant" value="${r.montant}"/></div>
+<div class="field"><label>Date</label><input type="date" id="er-date" value="${r.date||today()}"/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-edit-remb');document.getElementById('modal-edit-remb').remove()">Annuler</button>
+<button class="btn btn-primary" style="flex:2" onclick="saveEditRemboursement('${creditKey}',${idx})">✅ Enregistrer</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.editRemboursement=editRemboursement;
+
+async function saveEditRemboursement(creditKey,idx){
+const c=getCredits().find(x=>x._key===creditKey);if(!c)return;
+const montant=+document.getElementById("er-montant").value;
+const date=document.getElementById("er-date").value;
+if(!montant||montant<=0)return alert("Montant invalide !");
+await saveUndoSnapshot("Modifier remboursement");
+const remboursements=[...(c.remboursements||[])];
+const oldMontant=remboursements[idx].montant;
+remboursements[idx]={date,montant};
+const diff=montant-oldMontant;
+const newRestant=Math.max(0,(+c.montantRestant||0)-diff);
+const newStatus=newRestant<=0?"soldé":"en cours";
+await set(ref(db,"credits/"+creditKey),{...c,remboursements,montantRestant:newRestant,status:newStatus});
+closeModal("modal-edit-remb");
+document.getElementById("modal-edit-remb")?.remove();
+alert("✅ Remboursement modifié !");
+render();
+}
+window.saveEditRemboursement=saveEditRemboursement;
+
+async function deleteRemboursement(creditKey,idx){
+await saveUndoSnapshot("Supprimer remboursement");
+if(!confirm("Supprimer ce remboursement ?"))return;
+const c=getCredits().find(x=>x._key===creditKey);if(!c)return;
+const remboursements=[...(c.remboursements||[])];
+const montantSupprime=remboursements[idx].montant;
+remboursements.splice(idx,1);
+const newRestant=(+c.montantRestant||0)+montantSupprime;
+await set(ref(db,"credits/"+creditKey),{...c,remboursements,montantRestant:newRestant,status:"en cours"});
+alert("✅ Remboursement supprimé !");
+render();
+}
+window.deleteRemboursement=deleteRemboursement;
+
+function editRetrait(key){
+const r=getRetraits().find(x=>x._key===key);if(!r)return;
+const html=`<div class="overlay" id="modal-edit-retrait" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">✎ Modifier retrait</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-edit-retrait');document.getElementById('modal-edit-retrait').remove()">✕</button></div>
+<div class="sheet-body">
+<div class="field"><label>Montant (F CFA)</label><input type="number" id="ert-montant" value="${r.montant}"/></div>
+<div class="field"><label>Date</label><input type="date" id="ert-date" value="${r.date||today()}"/></div>
+<div class="field"><label>Note</label><input type="text" id="ert-note" value="${r.note||''}"/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-edit-retrait');document.getElementById('modal-edit-retrait').remove()">Annuler</button>
+<button class="btn btn-primary" style="flex:2" onclick="saveEditRetrait('${key}')">✅ Enregistrer</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.editRetrait=editRetrait;
+
+async function saveEditRetrait(key){
+const r=getRetraits().find(x=>x._key===key);if(!r)return;
+const montant=+document.getElementById("ert-montant").value;
+const date=document.getElementById("ert-date").value;
+const note=document.getElementById("ert-note").value.trim();
+if(!montant||montant<=0)return alert("Montant invalide !");
+await saveUndoSnapshot("Modifier retrait");
+const diff=montant-r.montant;
+await set(ref(db,"retraits/"+key),{...r,montant,date,note,mois:date.slice(0,7)});
+// Ajuster la caisse
+if(diff!==0){
+const ak=push(ref(db,"caisseConfig/apports")).key;
+await set(ref(db,"caisseConfig/apports/"+ak),{_key:ak,montant:-diff,date,note:"✎ Ajust. retrait "+r.assoc});
+}
+closeModal("modal-edit-retrait");
+document.getElementById("modal-edit-retrait")?.remove();
+alert("✅ Retrait modifié !");
+render();
+}
+window.saveEditRetrait=saveEditRetrait;
 
 function renderRapport(){
 const el=document.getElementById("content");
