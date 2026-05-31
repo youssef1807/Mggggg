@@ -445,6 +445,7 @@ const MONTHS_FULL=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","A
 let role=null,selectedLoginRole=null;
 let rapportMode="choose";
 let currentRapport={ventes:[]};
+let rapportDate=new Date().toISOString().slice(0,10);
 let editingRapportId=null,editVentes=[];
 let currentTab="rapport";
 let fbProducts={},fbSales={},fbRapports={},fbMoves={};
@@ -571,7 +572,7 @@ render();
 }
 
 function logout(){
-role=null;selectedLoginRole=null;rapportMode="choose";currentRapport={ventes:[]};
+role=null;selectedLoginRole=null;rapportMode="choose";currentRapport={ventes:[]};rapportDate=new Date().toISOString().slice(0,10);
 document.getElementById("app").style.display="none";
 document.getElementById("login-screen").style.display="flex";
 document.getElementById("login-form").style.display="none";
@@ -583,7 +584,7 @@ window.logout=logout;
 
 function goTab(t){
 currentTab=t;
-if(t==="rapport")rapportMode="choose";
+if(t==="rapport"){rapportMode="choose";rapportDate=new Date().toISOString().slice(0,10);}
 document.querySelectorAll(".nav-btn").forEach(b=>b.classList.remove("active"));
 document.getElementById("nav-"+t)?.classList.add("active");
 render();
@@ -786,8 +787,8 @@ if(!v.qty||v.qty<=0)return alert("Quantité invalide.");
 const p=getP(v.productId);
 if(v.qty>p.stock)return alert(`Stock insuffisant pour ${p.name} (stock: ${p.stock})`);
 }
-if(!confirm("Valider le rapport du jour ?"))return;
-const dateStr=today();
+if(!confirm("Valider le rapport du "+dateLabel(rapportDate)+" ?"))return;
+const dateStr=rapportDate;
 // Traiter les réapprovisionnements dépôt
 for(const v of lignesDepot){
 const depot=getDepots().find(d=>d.lieu===v.depotNom);
@@ -831,7 +832,7 @@ if(v.creditKey&&v.creditKey!=="__nouveau__"){
   await set(ref(db,"credits/"+k),{_key:k,client:v.clientCredit||"Client inconnu",montantInitial:montant,montantRestant:montant,date:dateStr,note:noteVente,status:"en cours",remboursements:[],historique:[{date:dateStr,montant,note:noteVente}],fromRapport:true});
 }
 }
-currentRapport={ventes:[]};rapportMode="choose";
+currentRapport={ventes:[]};rapportMode="choose";rapportDate=new Date().toISOString().slice(0,10);
 let msg="✅ Rapport validé !";
 if(lignesDepot.length)msg+="\n📦 "+lignesDepot.length+" dépôt(s) réapprovisionné(s)";
 if(ventesCredit.length)msg+="\n🤝 "+ventesCredit.length+" crédit(s) créé(s) automatiquement";
@@ -840,8 +841,8 @@ alert(msg);render();
 window.validerRapport=validerRapport;
 
 async function validerJourneeVide(){
-if(!confirm("Confirmer : aucune vente aujourd'hui ?"))return;
-await fbAddRapport({date:today(),ventes:[],totals:{benefGros:0,benefDetail:0,perteCadeaux:0,totalProfit:0,totalCA:0,nbCadeaux:0,nbVentes:0},source:"zero"});
+if(!confirm("Confirmer : aucune vente le "+dateLabel(rapportDate)+" ?"))return;
+await fbAddRapport({date:rapportDate,ventes:[],totals:{benefGros:0,benefDetail:0,perteCadeaux:0,totalProfit:0,totalCA:0,nbCadeaux:0,nbVentes:0},source:"zero"});
 rapportMode="choose";
 alert("✅ Journée sans vente enregistrée.");render();
 }
@@ -2324,11 +2325,16 @@ window.deleteCredit=deleteCredit;
 function renderRapport(){
 const el=document.getElementById("content");
 if(rapportMode==="choose"){
-el.innerHTML=`<div style="font-weight:800;font-size:16px;margin-bottom:2px">📋 Rapport Journalier</div><div style="font-size:11px;color:var(--muted);margin-bottom:20px">${dateLabel(today())}</div><div style="font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Comment saisir les ventes ?</div><div class="rapport-actions" style="grid-template-columns:1fr 1fr"><div class="action-card ac-manual" onclick="rapportMode='manual';renderRapport()"><div class="action-card-ico">✍️</div><div class="action-card-title" style="color:var(--blue)">Saisie manuelle</div><div class="action-card-desc">Entrer les ventes ligne par ligne</div></div><div class="action-card ac-photo" onclick="triggerPhoto()"><div class="action-card-ico">📷</div><div class="action-card-title" style="color:#2dd4bf">Scanner le cahier</div><div class="action-card-desc">Photo → l'IA détecte les ventes</div></div></div><div class="action-card" style="background:#f59e0b14;border:1px solid #f59e0b30;text-align:center;padding:14px 12px" onclick="goTab('depots')"><div style="font-size:22px;margin-bottom:4px">🏪</div><div style="font-weight:800;font-size:12px;color:var(--amber)">Dépôt-vente</div><div style="font-size:10px;color:var(--muted);margin-top:2px">Créer ou mettre à jour un dépôt</div></div><div class="action-card ac-zero" style="text-align:center;padding:14px 12px" onclick="validerJourneeVide()"><div style="font-size:22px;margin-bottom:4px">🚫</div><div style="font-weight:800;font-size:12px;color:#9ca3af">Journée sans vente</div><div style="font-size:10px;color:var(--muted);margin-top:2px">Enregistrer 0 vente pour aujourd'hui</div></div>`;
+el.innerHTML=`<div style="font-weight:800;font-size:16px;margin-bottom:2px">📋 Rapport Journalier</div>
+<div style="margin-bottom:18px;margin-top:8px">
+<label style="font-size:10px;color:var(--muted);font-weight:700;letter-spacing:.6px;text-transform:uppercase;display:block;margin-bottom:6px">📅 Date du rapport</label>
+<input type="date" id="rapport-date-picker" value="${rapportDate}" max="${today()}" onchange="rapportDate=this.value" style="background:var(--bg2);border:2px solid var(--violet);border-radius:12px;color:var(--text);padding:11px 14px;font-size:15px;font-family:'Syne',system-ui,sans-serif;width:100%;outline:none;-webkit-appearance:none;"/>
+</div>
+<div style="font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Comment saisir les ventes ?</div><div class="rapport-actions" style="grid-template-columns:1fr 1fr"><div class="action-card ac-manual" onclick="rapportDate=document.getElementById('rapport-date-picker').value;rapportMode='manual';renderRapport()"><div class="action-card-ico">✍️</div><div class="action-card-title" style="color:var(--blue)">Saisie manuelle</div><div class="action-card-desc">Entrer les ventes ligne par ligne</div></div><div class="action-card ac-photo" onclick="rapportDate=document.getElementById('rapport-date-picker').value;triggerPhoto()"><div class="action-card-ico">📷</div><div class="action-card-title" style="color:#2dd4bf">Scanner le cahier</div><div class="action-card-desc">Photo → l'IA détecte les ventes</div></div></div><div class="action-card" style="background:#f59e0b14;border:1px solid #f59e0b30;text-align:center;padding:14px 12px" onclick="goTab('depots')"><div style="font-size:22px;margin-bottom:4px">🏪</div><div style="font-weight:800;font-size:12px;color:var(--amber)">Dépôt-vente</div><div style="font-size:10px;color:var(--muted);margin-top:2px">Créer ou mettre à jour un dépôt</div></div><div class="action-card ac-zero" style="text-align:center;padding:14px 12px" onclick="rapportDate=document.getElementById('rapport-date-picker').value;validerJourneeVide()"><div style="font-size:22px;margin-bottom:4px">🚫</div><div style="font-weight:800;font-size:12px;color:#9ca3af">Journée sans vente</div><div style="font-size:10px;color:var(--muted);margin-top:2px">Enregistrer 0 vente pour aujourd'hui</div></div>`;
 return;
 }
 const v=currentRapport.ventes,g=v.filter(x=>x.type==="gros"),d=v.filter(x=>x.type==="detail"),dep=v.filter(x=>x.type==="depot");
-el.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px"><button onclick="rapportMode='choose';currentRapport={ventes:[]};renderRapport()" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer">←</button><span style="font-weight:800;font-size:16px">📋 Rapport Journalier</span></div><div style="font-size:11px;color:var(--muted);margin-bottom:14px;margin-left:28px">${dateLabel(today())}</div>
+el.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px"><button onclick="rapportMode='choose';currentRapport={ventes:[]};renderRapport()" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer">←</button><span style="font-weight:800;font-size:16px">📋 Rapport Journalier</span></div><div style="font-size:11px;color:var(--muted);margin-bottom:14px;margin-left:28px">${dateLabel(rapportDate)}</div>
 ${dep.length?`<div class="rapport-section" style="border-color:#f59e0b55"><div class="rapport-section-title" style="color:var(--amber)">🏪 Réappro Dépôts-vente</div>${dep.map(venteItemHtml).join("")}<button class="btn btn-amber btn-sm btn-full" onclick="addVente('depot')" style="margin-top:4px">+ Ajouter réappro dépôt</button></div>`:""}
 <div class="rapport-section"><div class="rapport-section-title" style="color:var(--violet)">⬡ Ventes en Gros</div>${g.map(venteItemHtml).join("")}<button class="btn btn-violet btn-sm btn-full" onclick="addVente('gros')" style="margin-top:4px">+ Ajouter vente gros</button></div><div class="rapport-section"><div class="rapport-section-title" style="color:var(--blue)">◎ Ventes au Détail</div>${d.map(venteItemHtml).join("")}<button class="btn btn-primary btn-sm btn-full" onclick="addVente('detail')" style="margin-top:4px">+ Ajouter vente détail</button></div>
 ${dep.length?`<div style="background:#f59e0b14;border:1px solid #f59e0b33;border-radius:12px;padding:12px;margin-bottom:10px;font-size:12px;color:var(--amber)">⚠️ Vérifie bien les dépôts destinataires avant de valider !</div>`:""}
