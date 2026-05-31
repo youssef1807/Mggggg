@@ -232,12 +232,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Syne',
 <button class="nav-btn" id="nav-more" onclick="toggleMoreMenu()"><span class="ico">⋯</span><span class="lbl">Plus</span></button>
 </nav>
 <!-- MORE MENU -->
-<div id="more-menu" style="display:none;position:fixed;bottom:calc(56px + env(safe-area-inset-bottom));left:0;right:0;background:var(--bg2);border-top:1px solid var(--border);z-index:50;padding:8px 0">
-<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:4px;padding:4px 8px">
-<button class="nav-btn" id="nav-produits" onclick="goTab('produits');closeMoreMenu()" style="display:none;min-width:70px"><span class="ico">📦</span><span class="lbl">Produits</span></button>
-<button class="nav-btn" id="nav-stats" onclick="goTab('stats');closeMoreMenu()" style="display:none;min-width:70px"><span class="ico">📈</span><span class="lbl">Stats</span></button>
-<button class="nav-btn" id="nav-depenses" onclick="goTab('depenses');closeMoreMenu()" style="display:none;min-width:70px"><span class="ico">💸</span><span class="lbl">Dépenses</span></button>
-<button class="nav-btn" id="nav-historique" onclick="goTab('historique');closeMoreMenu()" style="min-width:70px"><span class="ico">🗂</span><span class="lbl">Histo</span></button>
+<div id="more-menu" style="display:none;position:fixed;bottom:calc(56px + env(safe-area-inset-bottom));left:0;right:0;background:var(--bg2);border-top:2px solid var(--border);z-index:99;padding:10px 0;box-shadow:0 -4px 20px #000a">
+<div style="display:flex;justify-content:space-around;padding:0 8px">
+<button class="nav-btn" id="nav-produits" onclick="goTab('produits');closeMoreMenu()" style="display:none;min-width:60px"><span class="ico">📦</span><span class="lbl">Produits</span></button>
+<button class="nav-btn" id="nav-stats" onclick="goTab('stats');closeMoreMenu()" style="display:none;min-width:60px"><span class="ico">📈</span><span class="lbl">Stats</span></button>
+<button class="nav-btn" id="nav-depenses" onclick="goTab('depenses');closeMoreMenu()" style="display:none;min-width:60px"><span class="ico">💸</span><span class="lbl">Dépenses</span></button>
+<button class="nav-btn" id="nav-historique" onclick="goTab('historique');closeMoreMenu()" style="min-width:60px"><span class="ico">🗂</span><span class="lbl">Histo</span></button>
 </div>
 </div>
 </div>
@@ -515,10 +515,10 @@ document.addEventListener("visibilitychange",()=>{if(document.hidden&&role)logou
 document.addEventListener("click",function(e){
 const menu=document.getElementById("more-menu");
 const btn=document.getElementById("nav-more");
-if(menu&&btn&&!menu.contains(e.target)&&!btn.contains(e.target)){
+if(menu&&btn&&menu.style.display!=="none"&&!menu.contains(e.target)&&!btn.contains(e.target)){
 menu.style.display="none";
 }
-});
+},true);
 
 function selectRole(r){
 selectedLoginRole=r;
@@ -2106,7 +2106,15 @@ window.saveApport=saveApport;
 
 function toggleMoreMenu(){
 const m=document.getElementById("more-menu");
-if(m)m.style.display=m.style.display==="none"?"block":"none";
+if(!m)return;
+const isHidden=m.style.display==="none"||m.style.display==="";
+m.style.display=isHidden?"block":"none";
+// Active style on more button
+const btn=document.getElementById("nav-more");
+if(btn){
+  if(isHidden){btn.style.color="var(--blue)";}
+  else{btn.style.color="";}
+}
 }
 window.toggleMoreMenu=toggleMoreMenu;
 
