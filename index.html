@@ -1667,7 +1667,7 @@ ${totalSolde>0?`<div style="font-size:10px;color:var(--muted);margin-top:4px;fon
 return`<div class="depense-card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
 <span style="font-weight:800;font-size:13px">${label}</span>
 <div style="display:flex;gap:6px">
-<button class="btn btn-red btn-sm" onclick="openAddDepenses('${mk+'-15'}')">+ Dépense</button>
+<button class="btn btn-red btn-sm" onclick="openAddDepenses('${mk}')">+ Dépense</button>
 </div>
 </div>
 ${depList.length>0?`${depList.sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(d=>`<div class="depense-row" style="align-items:center"><div style="flex:1"><span class="depense-cat">${d.cat}</span>${d.note?`<div style="font-size:10px;color:var(--muted)">${d.note}</div>`:""}<div style="font-size:10px;color:var(--muted)">${d.date||d.mois}</div></div><div style="display:flex;align-items:center;gap:6px"><span class="depense-montant">-${cfa(d.montant)}</span><button onclick="openEditDepenses('${d._key}')" style="background:#3b82f622;border:1px solid #3b82f644;color:var(--blue);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✎</button><button onclick="deleteDepense('${d._key}')" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button></div></div>`).join("")}
@@ -1686,7 +1686,17 @@ ${moisCards||`<div class="empty">Aucune donnée pour les 6 derniers mois.</div>`
 }
 
 function openAddDepenses(prefillDate){
-document.getElementById("dep-date").value=prefillDate||today();
+// prefillDate can be a full date (2026-06-01) or just a month (2026-06)
+let dateVal;
+if(!prefillDate){
+  dateVal=today();
+}else if(prefillDate.length===7){
+  // It's a month - use today if current month, else 1st of month
+  dateVal=prefillDate===today().slice(0,7)?today():prefillDate+"-01";
+}else{
+  dateVal=prefillDate;
+}
+document.getElementById("dep-date").value=dateVal;
 document.getElementById("dep-cat").value="";
 document.getElementById("dep-montant").value="";
 document.getElementById("dep-note").value="";
