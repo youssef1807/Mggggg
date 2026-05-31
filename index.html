@@ -1786,6 +1786,32 @@ onValue(ref(db,"caisseConfig"),(snap)=>{fbCaisseConfig=snap.val()||{};if(role&&c
 const getCredits=()=>toArr(fbCredits);
 
 // ── CAISSE RENDER ──────────────────────────────────────────────────────────────
+function calcSoldeCaisse(){
+const soldeDepart=+fbCaisseConfig?.soldeDepart||0;
+let entrees=0,sorties=0;
+// Ventes (rapports)
+getRapports().forEach(r=>(r.ventes||[]).filter(v=>!v.isGift&&v.type!=="depot").forEach(v=>{entrees+=v.price*v.qty;}));
+// Versements dépôts
+getDepots().forEach(d=>(d.versements||[]).forEach(v=>{entrees+=(+v.montant||0);}));
+// Remboursements crédits
+getCredits().forEach(c=>(c.remboursements||[]).forEach(r=>{entrees+=(+r.montant||0);}));
+// Dépenses
+toArr(fbDepenses).forEach(d=>{
+  if(d.cat&&d.montant)sorties+=(+d.montant||0);
+  else if(d.lignes)(d.lignes||[]).forEach(l=>{if(l.montant)sorties+=(+l.montant||0);});
+});
+// Retraits
+getRetraits().forEach(r=>{sorties+=(+r.montant||0);});
+// Apports manuels
+toArr(fbCaisseConfig?.apports||{}).forEach(a=>{
+  const skip=a.note&&(a.note.startsWith("💰 Retrait")||a.note.startsWith("↩ Annul.")||a.note.startsWith("✎ Ajust."));
+  if(skip)return;
+  if(a.montant>0)entrees+=(+a.montant||0);
+  else sorties+=Math.abs(+a.montant||0);
+});
+return soldeDepart+entrees-sorties;
+}
+
 function renderCaisse(){
 const el=document.getElementById("content");if(!el)return;
 const soldeDepart=+(fbCaisseConfig.soldeDepart||0);
@@ -2889,10 +2915,7 @@ const capital=calcCapital();
 const capitalEngage=getCommandes().filter(c=>c.status==="en_attente").reduce((a,c)=>a+(+c.totalMontant||0),0);
 // Capital mobilisé = stock + caisse + dépôts (moitié prix) + crédits + commandes en attente
 const capitalStock=capital;
-const capitalCaisse=+fbCaisseConfig?.soldeDepart||0;
-const allApports=toArr(fbCaisseConfig?.apports||{});
-const totalApports=allApports.reduce((a,ap)=>a+(+ap.montant||0),0);
-const caisseActuelle=capitalCaisse+totalApports+getSales().reduce((a,s)=>a+s.price*s.qty,0)-getRetraits().reduce((a,r)=>a+(+r.montant||0),0)-getDepenses().filter(d=>d.cat).reduce((a,d)=>a+(+d.montant||0),0);
+const caisseActuelle=calcSoldeCaisse();
 const capitalDepots=getDepots().filter(d=>d.status==="open").reduce((a,d)=>{
   const p=getP(d.productId);const prixAchat=p?+p.buyPrice||0:0;
   const qtyRestante=Math.max(0,(+d.qtyDeposited||0)-(+d.qtySold||0)-(+d.qtyReturned||0));
