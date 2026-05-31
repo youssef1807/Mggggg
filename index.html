@@ -2926,7 +2926,7 @@ const capitalEngage=getCommandes().filter(c=>c.status==="en_attente").reduce((a,
 const capitalStock=capital;
 const caisseActuelle=calcSoldeCaisse();
 const capitalDepots=getDepots().filter(d=>d.status==="open").reduce((a,d)=>{
-  const p=getP(d.productId);const prixAchat=p?+p.buyPrice||0:0;
+  const p=getP(d.productId);const prixAchat=p?+p.costPrice||0:0;
   const qtyRestante=Math.max(0,(+d.qtyDeposited||0)-(+d.qtySold||0)-(+d.qtyReturned||0));
   return a+(qtyRestante*prixAchat*0.7);
 },0);
