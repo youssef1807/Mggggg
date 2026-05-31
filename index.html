@@ -19,7 +19,7 @@
 }
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Syne',system-ui,sans-serif;overflow:hidden;}
 #app{display:flex;flex-direction:column;height:100%;height:100dvh;}
-#login-screen{position:fixed;inset:0;background:var(--bg);z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 28px;gap:0;}
+#login-screen{position:fixed;inset:0;background:var(--bg);z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 28px;gap:0;overflow-y:auto;}
 .login-logo{font-size:60px;margin-bottom:16px;}
 .login-brand{font-weight:800;font-size:26px;letter-spacing:1px;margin-bottom:6px;}
 .login-sub{font-size:13px;color:var(--muted);margin-bottom:36px;}
@@ -187,8 +187,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Syne',
 <div id="login-screen">
 <div class="login-logo">💨</div>
 <div class="login-brand">VapeTracker</div>
-<div class="login-sub">Choisissez votre compte</div>
-<div class="login-cards">
+<div class="login-sub" id="login-sub">Choisissez votre compte</div>
+<div class="login-cards" id="login-cards">
 <div class="login-card login-card-admin" id="card-admin" onclick="selectRole('admin')">
 <div class="login-card-ico">👑</div>
 <div class="login-card-title">Admin</div>
@@ -625,6 +625,8 @@ document.getElementById("card-"+r).classList.add("selected-"+r);
 document.getElementById("login-role-label").textContent=r==="admin"?"👑 Mot de passe Admin":"👤 Mot de passe Employé";
 document.getElementById("login-pw").value="";
 document.getElementById("login-err").textContent="";
+document.getElementById("login-cards").style.display="none";
+document.getElementById("login-sub").style.display="none";
 document.getElementById("login-form").style.display="flex";
 setTimeout(()=>document.getElementById("login-pw").focus(),300);
 }
@@ -633,6 +635,8 @@ window.selectRole=selectRole;
 function backToSelect(){
 selectedLoginRole=null;
 document.getElementById("login-form").style.display="none";
+document.getElementById("login-cards").style.display="grid";
+document.getElementById("login-sub").style.display="block";
 document.getElementById("card-admin").classList.remove("selected-admin");
 document.getElementById("card-employe").classList.remove("selected-employe");
 }
@@ -674,6 +678,8 @@ role=null;selectedLoginRole=null;rapportMode="choose";currentRapport={ventes:[]}
 document.getElementById("app").style.display="none";
 document.getElementById("login-screen").style.display="flex";
 document.getElementById("login-form").style.display="none";
+document.getElementById("login-cards").style.display="grid";
+document.getElementById("login-sub").style.display="block";
 document.getElementById("card-admin").classList.remove("selected-admin");
 document.getElementById("card-employe").classList.remove("selected-employe");
 document.getElementById("login-pw").value="";
