@@ -2758,6 +2758,49 @@ render();
 }
 window.saveEditRetrait=saveEditRetrait;
 
+function showCapitalMobilise(stock,caisse,depots,credits,commandes,total){
+const html=`<div class="overlay" id="modal-capital" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">💼 Capital mobilisé</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-capital');document.getElementById('modal-capital').remove()">✕</button></div>
+<div class="sheet-body">
+<div style="background:var(--bg);border-radius:12px;padding:14px;margin-bottom:12px">
+<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">📊 Détail du capital</div>
+<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
+<div><span style="font-size:13px">📦 Stock produits</span><div style="font-size:10px;color:var(--muted)">Valeur d'achat du stock</div></div>
+<span style="font-family:monospace;font-weight:700;color:var(--violet)">${cfa(Math.round(stock))}</span>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
+<div><span style="font-size:13px">🏦 Caisse</span><div style="font-size:10px;color:var(--muted)">Solde actuel</div></div>
+<span style="font-family:monospace;font-weight:700;color:var(--green)">${cfa(Math.round(caisse))}</span>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
+<div><span style="font-size:13px">🏪 Dépôts-vente</span><div style="font-size:10px;color:var(--muted)">Stock chez dépositaires (70% prix achat)</div></div>
+<span style="font-family:monospace;font-weight:700;color:var(--amber)">${cfa(Math.round(depots))}</span>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
+<div><span style="font-size:13px">🤝 Crédits en cours</span><div style="font-size:10px;color:var(--muted)">Montants restants à recevoir</div></div>
+<span style="font-family:monospace;font-weight:700;color:var(--blue)">${cfa(Math.round(credits))}</span>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
+<div><span style="font-size:13px">📬 Commandes en attente</span><div style="font-size:10px;color:var(--muted)">Argent engagé non reçu</div></div>
+<span style="font-family:monospace;font-weight:700;color:var(--red)">${cfa(Math.round(commandes))}</span>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0 4px;border-top:2px solid var(--border);margin-top:4px">
+<span style="font-size:14px;font-weight:800">= Capital total mobilisé</span>
+<span style="font-family:monospace;font-weight:800;font-size:18px;color:var(--violet)">${cfa(Math.round(total))}</span>
+</div>
+</div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-primary btn-full" onclick="closeModal('modal-capital');document.getElementById('modal-capital').remove()">Fermer</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.showCapitalMobilise=showCapitalMobilise;
+
 function showBenefDetail(benefBrut,depenses,retraitsHadi,retraitsYoussef,benefNet){
 const totalRetraits=retraitsHadi+retraitsYoussef;
 const html=`<div class="overlay" id="modal-benef-detail" style="display:flex">
@@ -2844,6 +2887,20 @@ if(currentTab==="dashboard"){
 const m=monthStats(mk),totalB=getSales().reduce((a,s)=>a+s.profit,0),low=getProducts().filter(p=>p.stock<=5);
 const capital=calcCapital();
 const capitalEngage=getCommandes().filter(c=>c.status==="en_attente").reduce((a,c)=>a+(+c.totalMontant||0),0);
+// Capital mobilisé = stock + caisse + dépôts (moitié prix) + crédits + commandes en attente
+const capitalStock=capital;
+const capitalCaisse=+fbCaisseConfig?.soldeDepart||0;
+const allApports=toArr(fbCaisseConfig?.apports||{});
+const totalApports=allApports.reduce((a,ap)=>a+(+ap.montant||0),0);
+const caisseActuelle=capitalCaisse+totalApports+getSales().reduce((a,s)=>a+s.price*s.qty,0)-getRetraits().reduce((a,r)=>a+(+r.montant||0),0)-getDepenses().filter(d=>d.cat).reduce((a,d)=>a+(+d.montant||0),0);
+const capitalDepots=getDepots().filter(d=>d.status==="open").reduce((a,d)=>{
+  const p=getP(d.productId);const prixAchat=p?+p.buyPrice||0:0;
+  const qtyRestante=Math.max(0,(+d.qtyDeposited||0)-(+d.qtySold||0)-(+d.qtyReturned||0));
+  return a+(qtyRestante*prixAchat*0.7);
+},0);
+const capitalCredits=getCredits().filter(c=>c.status!=="soldé").reduce((a,c)=>a+(+c.montantRestant||0),0);
+const capitalCommandes=capitalEngage;
+const capitalMobilise=capitalStock+caisseActuelle+capitalDepots+capitalCredits+capitalCommandes;
 const depListDash=getDepensesForMonthAll(mk);
 const depMoisDash=depListDash.length>0?{total:depListDash.reduce((a,d)=>a+(+d.montant||0),0)}:null;
 const retraitsMoisDash=getTotalRetraitsAllMois(mk);
@@ -2852,7 +2909,7 @@ const retraitsYoussefDash=getTotalRetraitsMois(mk,"Youssef");
 const beneficeReelDash=m.profit-(depMoisDash?.total||0)-retraitsMoisDash;
 const cd=Array.from({length:6},(_,i)=>{const dd=new Date(d.getFullYear(),d.getMonth()-5+i,1);const k=`${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,"0")}`;return{lbl:MONTHS[dd.getMonth()],v:monthStats(k).profit};});
 const bmax=Math.max(...cd.map(x=>x.v),1);
-el.innerHTML=`${monthCardHtml(mk,currentLabel,true)}<div class="grid2" style="margin-bottom:12px"><div class="stat-box" onclick="showBenefDetail(${m.profit},${depMoisDash?.total||0},${retraitsHadiDash},${retraitsYoussefDash},${beneficeReelDash})" style="cursor:pointer;border-color:#22c55e44"><div class="stat-label">Bénéf. net réel (mois) 👆</div><div class="stat-val" style="color:${beneficeReelDash>=0?"var(--green)":"var(--red)"};font-size:14px">${beneficeReelDash>=0?"+":""}${cfa(Math.round(beneficeReelDash))}</div><div class="stat-sub">${depMoisDash?"Dép: -"+cfa(depMoisDash.total)+" | ":"⚠️ "}${retraitsMoisDash>0?"Retraits: -"+cfa(retraitsMoisDash):""}</div></div><div class="stat-box"><div class="stat-label">CA ce mois</div><div class="stat-val" style="color:var(--blue);font-size:14px">${cfa(m.ca)}</div></div><div class="stat-box"><div class="stat-label">Capital stock</div><div class="stat-val" style="color:var(--violet);font-size:13px">${cfa(capital)}</div><div class="stat-sub">${getProducts().reduce((a,p)=>a+p.stock,0)} unités</div></div>
+el.innerHTML=`${monthCardHtml(mk,currentLabel,true)}<div class="grid2" style="margin-bottom:12px"><div class="stat-box" onclick="showBenefDetail(${m.profit},${depMoisDash?.total||0},${retraitsHadiDash},${retraitsYoussefDash},${beneficeReelDash})" style="cursor:pointer;border-color:#22c55e44"><div class="stat-label">Bénéf. net réel (mois) 👆</div><div class="stat-val" style="color:${beneficeReelDash>=0?"var(--green)":"var(--red)"};font-size:14px">${beneficeReelDash>=0?"+":""}${cfa(Math.round(beneficeReelDash))}</div><div class="stat-sub">${depMoisDash?"Dép: -"+cfa(depMoisDash.total)+" | ":"⚠️ "}${retraitsMoisDash>0?"Retraits: -"+cfa(retraitsMoisDash):""}</div></div><div class="stat-box"><div class="stat-label">CA ce mois</div><div class="stat-val" style="color:var(--blue);font-size:14px">${cfa(m.ca)}</div></div><div class="stat-box" onclick="showCapitalMobilise(${capitalStock},${caisseActuelle},${capitalDepots},${capitalCredits},${capitalCommandes},${capitalMobilise})" style="cursor:pointer;border-color:#a78bfa44"><div class="stat-label">💼 Capital mobilisé 👆</div><div class="stat-val" style="color:var(--violet);font-size:13px">${cfa(Math.round(capitalMobilise))}</div><div class="stat-sub">Stock+Caisse+Dépôts+Crédits+Cdes</div></div>
 ${capitalEngage>0?`<div class="stat-box" style="border-color:#f59e0b44"><div class="stat-label">💸 Engagé commandes</div><div class="stat-val" style="color:var(--amber);font-size:13px">${cfa(capitalEngage)}</div><div class="stat-sub">${getCommandes().filter(c=>c.status==="en_attente").length} commande(s) en attente</div></div>`:""}<div class="stat-box"><div class="stat-label">Bénéf. brut total</div><div class="stat-val" style="color:var(--green);font-size:13px">${cfa(totalB)}</div></div></div><div class="card"><div style="font-weight:800;font-size:13px;margin-bottom:12px">📈 Bénéfices 6 mois</div><div class="bar-chart">${cd.map((x,i)=>{const h=x.v?Math.round((x.v/bmax)*60):2;return`<div class="bar-col"><div class="bar" style="height:${h}px;background:hsl(${210-i*8},60%,${38+(x.v/bmax)*22}%)"></div><span class="bar-lbl">${x.lbl}</span></div>`;}).join("")}</div></div>${retraitsMoisDash>0?`<div class="card" style="margin-bottom:12px"><div style="font-weight:800;font-size:13px;margin-bottom:10px">💰 Retraits du mois</div>
 <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><span style="font-size:13px">Hadi</span><span style="font-family:monospace;color:var(--amber);font-weight:700">-${cfa(retraitsHadiDash)}</span></div>
 <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><span style="font-size:13px">Youssef</span><span style="font-family:monospace;color:var(--amber);font-weight:700">-${cfa(retraitsYoussefDash)}</span></div>
