@@ -339,6 +339,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Syne',
 </div>
 <div class="field"><label>Prix de vente estimé / unité (F CFA) *</label><input type="number" id="dp-prix-estime" placeholder="ex: 3500" min="0"/></div>
 <div class="field"><label>Note (optionnel)</label><input type="text" id="dp-note" placeholder="ex: Dépôt mensuel"/></div>
+<div style="background:#f59e0b14;border:1px solid #f59e0b33;border-radius:9px;padding:10px 12px;display:flex;align-items:center;gap:10px;cursor:pointer" onclick="document.getElementById('dp-no-stock').checked=!document.getElementById('dp-no-stock').checked">
+<input type="checkbox" id="dp-no-stock" style="width:18px;height:18px;accent-color:var(--amber);flex-shrink:0"/>
+<div><div style="font-size:12px;font-weight:700;color:var(--amber)">📦 Dépôt historique</div><div style="font-size:10px;color:var(--muted)">Ne pas déduire du stock (dépôt déjà parti avant l'app)</div></div>
+</div>
 <div style="background:#3b82f614;border:1px solid #3b82f630;border-radius:9px;padding:9px 12px;font-size:11px;color:var(--blue)">💡 Le prix estimé sert à calculer la marge lors des versements reçus.</div>
 </div>
 <div class="sheet-footer">
@@ -1198,16 +1202,20 @@ const qty=+document.getElementById("dp-qty").value;
 const date=document.getElementById("dp-date").value;
 const prixEst=+document.getElementById("dp-prix-estime").value||0;
 const note=document.getElementById("dp-note").value.trim();
+const noStock=document.getElementById("dp-no-stock").checked;
 const p=getP(pid);
 if(!lieu||!pid||!qty||!date)return alert("Remplis tous les champs obligatoires !");
-if(qty>p.stock)return alert(`Stock insuffisant (stock: ${p.stock})`);
-if(!confirm(`Créer un dépôt de ${qty} ${p.name} chez "${lieu}" ?`))return;
-await fbSetProduct({...p,stock:p.stock-qty});
-await fbAddMove({productId:p.id,productName:p.name,type:"out",qty,date,note:"Dépôt-vente: "+lieu});
+if(!noStock&&qty>p.stock)return alert(`Stock insuffisant (stock: ${p.stock})`);
+if(!confirm(`Créer un dépôt de ${qty} ${p.name} chez "${lieu}" ?${noStock?"\n📦 Dépôt historique — stock non déduit":""}`))return;
+if(!noStock){
+  await fbSetProduct({...p,stock:p.stock-qty});
+  await fbAddMove({productId:p.id,productName:p.name,type:"out",qty,date,note:"Dépôt-vente: "+lieu});
+}
 const k=push(ref(db,"depots")).key;
-await set(ref(db,`depots/${k}`),{_key:k,lieu,productId:p.id,productName:p.name,qtyDeposited:qty,qtySold:0,qtyReturned:0,dateDepot:date,prixEstime:prixEst,note,status:"open",versements:[]});
+await set(ref(db,`depots/${k}`),{_key:k,lieu,productId:p.id,productName:p.name,qtyDeposited:qty,qtySold:0,qtyReturned:0,dateDepot:date,prixEstime:prixEst,note,status:"open",versements:[],historique:noStock});
 closeModal("modal-add-depot");
-alert("✅ Dépôt créé !");
+alert("✅ Dépôt créé !"+(noStock?" (stock non modifié)":""));
+render();
 }
 window.createDepot=createDepot;
 
@@ -1513,6 +1521,7 @@ document.getElementById("dp-qty").value="";
 document.getElementById("dp-lieu").value="";
 document.getElementById("dp-note").value="";
 document.getElementById("dp-prix-estime").value="";
+document.getElementById("dp-no-stock").checked=false;
 openModal("modal-add-depot");
 }
 window.openAddDepot=openAddDepot;
