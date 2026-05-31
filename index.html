@@ -1644,9 +1644,6 @@ if(!currentRetraitAssoc)return;
 const mk=date.slice(0,7);
 const k=push(ref(db,"retraits")).key;
 await set(ref(db,"retraits/"+k),{_key:k,assoc:currentRetraitAssoc,montant,date,mois:mk,note});
-// Débiter la caisse
-const ak=push(ref(db,"caisseConfig/apports")).key;
-await set(ref(db,"caisseConfig/apports/"+ak),{_key:ak,montant:-montant,date,note:"💰 Retrait "+currentRetraitAssoc+(note?" — "+note:"")});
 closeModal("modal-add-retrait");
 alert("✅ Retrait de "+cfa(montant)+" enregistré pour "+currentRetraitAssoc);
 render();
@@ -1658,10 +1655,7 @@ const r=getRetraits().find(r=>r._key===key);if(!r)return;
 await saveUndoSnapshot("Supprimer retrait");
 if(!confirm("Supprimer ce retrait de "+cfa(r.montant)+" ?"))return;
 await remove(ref(db,"retraits/"+key));
-// Recréditer la caisse
-const ak=push(ref(db,"caisseConfig/apports")).key;
-await set(ref(db,"caisseConfig/apports/"+ak),{_key:ak,montant:+r.montant,date:today(),note:"↩ Annul. retrait "+r.assoc});
-alert("✅ Retrait supprimé — Caisse recréditée");
+alert("✅ Retrait supprimé");
 render();
 }
 window.deleteRetrait=deleteRetrait;
@@ -1749,7 +1743,9 @@ getRetraits().forEach(r=>{
 });
 // Apports manuels en caisse
 (toArr(fbCaisseConfig.apports||{})).forEach(a=>{
-  const isManual=!a.note||(!a.note.startsWith("📬")&&!a.note.startsWith("🚚")&&!a.note.startsWith("✎")&&!a.note.startsWith("❌")&&!a.note.startsWith("💰 Retrait")&&!a.note.startsWith("↩"));
+  const isRetrait=a.note&&(a.note.startsWith("💰 Retrait")||a.note.startsWith("↩ Annul. retrait")||a.note.startsWith("✎ Ajust. retrait"));
+  if(isRetrait)return; // retraits are now read directly from /retraits
+  const isManual=!a.note||(!a.note.startsWith("📬")&&!a.note.startsWith("🚚")&&!a.note.startsWith("✎")&&!a.note.startsWith("❌")&&!a.note.startsWith("↩"));
   addEntry(a.date,(a.montant>0?"💵 Apport: ":"📤 Sortie: ")+(a.note||"Manuel"),+a.montant,isManual?"apport_manual":"apport",a._key);
 });
 
@@ -2646,13 +2642,7 @@ const date=document.getElementById("ert-date").value;
 const note=document.getElementById("ert-note").value.trim();
 if(!montant||montant<=0)return alert("Montant invalide !");
 await saveUndoSnapshot("Modifier retrait");
-const diff=montant-r.montant;
 await set(ref(db,"retraits/"+key),{...r,montant,date,note,mois:date.slice(0,7)});
-// Ajuster la caisse
-if(diff!==0){
-const ak=push(ref(db,"caisseConfig/apports")).key;
-await set(ref(db,"caisseConfig/apports/"+ak),{_key:ak,montant:-diff,date,note:"✎ Ajust. retrait "+r.assoc});
-}
 closeModal("modal-edit-retrait");
 document.getElementById("modal-edit-retrait")?.remove();
 alert("✅ Retrait modifié !");
