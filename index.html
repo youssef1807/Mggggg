@@ -2810,7 +2810,7 @@ const html=`<div class="overlay" id="modal-capital" style="display:flex">
 <span style="font-family:monospace;font-weight:700;color:var(--green)">${cfa(Math.round(caisse))}</span>
 </div>
 <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
-<div><span style="font-size:13px">🏪 Dépôts-vente</span><div style="font-size:10px;color:var(--muted)">Stock chez dépositaires (70% prix achat)</div></div>
+<div><span style="font-size:13px">🏪 Dépôts-vente</span><div style="font-size:10px;color:var(--muted)">Versements restants à percevoir (70% prix vente estimé)</div></div>
 <span style="font-family:monospace;font-weight:700;color:var(--amber)">${cfa(Math.round(depots))}</span>
 </div>
 <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
@@ -2926,9 +2926,9 @@ const capitalEngage=getCommandes().filter(c=>c.status==="en_attente").reduce((a,
 const capitalStock=capital;
 const caisseActuelle=calcSoldeCaisse();
 const capitalDepots=getDepots().filter(d=>d.status==="open").reduce((a,d)=>{
-  const p=getP(d.productId);const prixAchat=p?+p.costPrice||0:0;
+  const prixEstime=+d.prixEstime||0;
   const qtyRestante=Math.max(0,(+d.qtyDeposited||0)-(+d.qtySold||0)-(+d.qtyReturned||0));
-  return a+(qtyRestante*prixAchat*0.7);
+  return a+(qtyRestante*prixEstime*0.7);
 },0);
 const capitalCredits=getCredits().filter(c=>c.status!=="soldé").reduce((a,c)=>a+(+c.montantRestant||0),0);
 const capitalCommandes=capitalEngage;
