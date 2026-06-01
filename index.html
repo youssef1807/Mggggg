@@ -1137,7 +1137,7 @@ document.getElementById("mrd-title").textContent="📋 "+dateLabel(r.date);
 document.getElementById("mrd-body").innerHTML=rapportDetailHtml(r);
 const footer=document.getElementById("mrd-footer");
 footer.innerHTML=role==="admin"&&r.source!=="zero"
-?`<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-rapport-detail')">Fermer</button><button class="btn btn-violet" style="flex:2" onclick="closeModal('modal-rapport-detail');openEditRapport('${key}')">✎ Modifier</button>`
+?`<button class="btn btn-ghost btn-sm" style="flex:1" onclick="closeModal('modal-rapport-detail')">Fermer</button><button class="btn btn-red btn-sm" style="flex:1" onclick="closeModal('modal-rapport-detail');deleteRapport('${key}')">🗑️</button><button class="btn btn-violet" style="flex:2" onclick="closeModal('modal-rapport-detail');openEditRapport('${key}')">✎ Modifier</button>`
 :`<button class="btn btn-primary btn-full" onclick="closeModal('modal-rapport-detail')">Fermer</button>`;
 openModal("modal-rapport-detail");
 }
@@ -1149,6 +1149,25 @@ editingRapportId=key;editVentes=(r.ventes||[]).map(v=>({...v,id:v.id||Date.now()
 renderEditRapport();openModal("modal-edit-rapport");
 }
 window.openEditRapport=openEditRapport;
+
+async function deleteRapport(key){
+const r=getRapports().find(r=>r._key===key);if(!r)return;
+if(!confirm("Supprimer le rapport du "+dateLabel(r.date)+" ?\n⚠️ Le stock sera restauré."))return;
+await saveUndoSnapshot("Supprimer rapport "+r.date);
+// Restore stock
+for(const v of (r.ventes||[])){
+  if(v.isGift||v.type==="depot")continue;
+  const p=getP(v.productId);
+  if(p)await fbSetProduct({...p,stock:p.stock+v.qty});
+}
+// Remove sales and moves
+await fbRemoveSalesByDate(r.date);
+await fbRemoveMovesByDateOut(r.date);
+await remove(ref(db,"rapports/"+key));
+alert("✅ Rapport supprimé !");
+render();
+}
+window.deleteRapport=deleteRapport;
 
 function renderEditRapport(){
 function evHtml(v){return`<div class="vente-item" style="margin-bottom:8px"><div class="vente-item-head"><span style="font-size:10px;color:var(--muted);font-weight:700">${v.type==="gros"?"⬡ GROS":"◎ DÉTAIL"}</span><button class="vente-remove" onclick="removeEditVente(${v.id})">✕</button></div><div class="field" style="margin-bottom:8px"><label>Produit</label><select onchange="updateEditVente(${v.id},'productId',this.value)">${prodOptions(v.productId)}</select></div><div class="grid2"><div class="field"><label>Quantité</label><input type="number" min="1" value="${v.qty}" oninput="updateEditVente(${v.id},'qty',this.value)"/></div><div class="field"><label>Prix/u (F)</label><input type="number" min="0" value="${v.price}" oninput="updateEditVente(${v.id},'price',this.value)"/></div></div></div>`;}
@@ -1196,11 +1215,15 @@ getDepots().forEach(dep=>{
 });
 const benefDepots=versementsMois.reduce((a,v)=>a+(+v.montant||0)*0.7,0);
 const profitVentes=ms.reduce((a,s)=>a+s.profit,0);
+const versementsMoisCA=versementsMois.reduce((a,v)=>a+(+v.montant||0),0);
+const caVentesEncaissees=ms.reduce((a,s)=>a+s.qty*s.salePrice,0);
 return{
   profit:profitVentes+benefDepots,
   profitVentes,
   benefDepots,
-  ca:ms.reduce((a,s)=>a+s.qty*s.salePrice,0),
+  ca:caVentesEncaissees+versementsMoisCA,
+  caVentes:caVentesEncaissees,
+  caDepots:versementsMoisCA,
   benefGros:g.reduce((a,s)=>a+s.profit,0),
   benefDetail:d.reduce((a,s)=>a+s.profit,0),
   unitsGros:g.reduce((a,s)=>a+s.qty,0),
@@ -1475,6 +1498,9 @@ if(!newQty||!newMontant)return alert("Quantité et montant obligatoires !");
 const v=d.versements[idx];
 const oldQty=+v.qtySold||0;
 const diffQty=newQty-oldQty;
+// Remove old sale from /sales if exists
+const oldSale=getSales().find(s=>s.productId==d.productId&&s.date===v.date&&(s.fromDepot||s.costPrice===s.salePrice*0.7));
+if(oldSale)await remove(ref(db,"sales/"+oldSale._key));
 const versements=[...d.versements];
 versements[idx]={...v,date:newDate,qtySold:newQty,montant:newMontant};
 const newQtySold=Math.max(0,(+d.qtySold||0)+diffQty);
@@ -2992,7 +3018,9 @@ if(!fbLoaded){el.innerHTML=`<div class="loading">⏳ Chargement des données...<
 
 if(currentTab==="dashboard"){
 const m=monthStats(mk),low=getProducts().filter(p=>p.stock<=5);
-const totalB=getSales().reduce((a,s)=>a+s.profit,0)+getDepots().reduce((a,d)=>{return a+(d.versements||[]).reduce((b,v)=>b+(+v.montant||0)*0.7,0);},0);
+const totalB=getSales().reduce((a,s)=>a+s.profit,0)+getDepots().reduce((a,d)=>{
+  return a+(d.versements||[]).reduce((b,v)=>b+(+v.montant||0)*0.7,0);
+},0);
 const capital=calcCapital();
 const capitalEngage=getCommandes().filter(c=>c.status==="en_attente").reduce((a,c)=>a+(+c.totalMontant||0),0);
 // Capital mobilisé = stock + caisse + dépôts (moitié prix) + crédits + commandes en attente
