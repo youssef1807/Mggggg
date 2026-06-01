@@ -2234,7 +2234,7 @@ for(const l of (c.lignes||[])){
   }
 }
 
-// Débiter transport de la caisse
+// Débiter transport de la caisse (même pour historique si transport renseigné)
 if(transport>0){
   const tk=push(ref(db,"caisseConfig/apports")).key;
   await set(ref(db,"caisseConfig/apports/"+tk),{_key:tk,montant:-transport,date:dateRec,note:"🚚 Transport commande: "+(c.fournisseur||"Fournisseur")});
@@ -2321,28 +2321,29 @@ for(const el of lignesEls){
   total+=qty*prix;
 }
 if(!lignes.length)return alert("Ajoute au moins un produit !");
-// Ajuster la caisse : annuler l'ancien débit, appliquer le nouveau
+// Ajuster la caisse seulement si commande non historique
 const diff=total-ancienTotal;
-if(diff!==0){
+if(diff!==0&&!c.historique){
   const ak=push(ref(db,"caisseConfig/apports")).key;
   await set(ref(db,"caisseConfig/apports/"+ak),{_key:ak,montant:-diff,date:date||today(),note:"✎ Ajust. commande: "+(fournisseur||"Fournisseur")});
 }
 await set(ref(db,"commandes/"+key),{...c,fournisseur,date,note,lignes,totalMontant:total});
 closeModal("modal-edit-commande");
 document.getElementById("modal-edit-commande")?.remove();
-alert("✅ Commande modifiée !"+(diff!==0?" | Caisse ajustée: "+(diff>0?"-":"+")+(cfa(Math.abs(diff))):""));
+alert("✅ Commande modifiée !"+(diff!==0&&!c.historique?" | Caisse ajustée: "+(diff>0?"-":"+")+(cfa(Math.abs(diff))):c.historique?" | Commande historique — caisse non modifiée":""));
 render();
 }
 window.saveEditCommande=saveEditCommande;
 
 async function deleteCommande(key){
 const c=getCommandes().find(c=>c._key===key);if(!c)return;
-if(!confirm("Supprimer cette commande ?\nLe montant sera recrédité dans la caisse."))return;
-// Recréditer la caisse
-const ak=push(ref(db,"caisseConfig/apports")).key;
-await set(ref(db,"caisseConfig/apports/"+ak),{_key:ak,montant:+c.totalMontant||0,date:today(),note:"❌ Annulation commande: "+(c.fournisseur||"Fournisseur")});
+if(!confirm("Supprimer cette commande ?"+(c.historique?"":" Le montant sera recrédité dans la caisse.")))return;
+if(!c.historique){
+  const ak=push(ref(db,"caisseConfig/apports")).key;
+  await set(ref(db,"caisseConfig/apports/"+ak),{_key:ak,montant:+c.totalMontant||0,date:today(),note:"❌ Annulation commande: "+(c.fournisseur||"Fournisseur")});
+}
 await remove(ref(db,"commandes/"+key));
-alert("✅ Commande supprimée | Caisse recréditée de "+cfa(+c.totalMontant||0));
+alert("✅ Commande supprimée"+(c.historique?"":" | Caisse recréditée de "+cfa(+c.totalMontant||0)));
 render();
 }
 window.deleteCommande=deleteCommande;
