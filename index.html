@@ -678,6 +678,14 @@ currentTab=role==="admin"?"dashboard":"rapport";
 rapportMode="choose";
 document.querySelectorAll(".nav-btn").forEach(b=>b.classList.remove("active"));
 document.getElementById("nav-"+currentTab)?.classList.add("active");
+// Auto-clean anciennes ventes dépôt dans /sales
+if(role==="admin"){
+  setTimeout(async()=>{
+    const depotSales=getSales().filter(s=>s.fromDepot||(s.costPrice>0&&s.costPrice===s.salePrice*0.7));
+    for(const s of depotSales)await remove(ref(db,"sales/"+s._key));
+    if(depotSales.length>0)render();
+  },2000);
+}
 render();
 }
 
@@ -1483,12 +1491,20 @@ async function deleteVersement(key,idx){
 const d=getDepots().find(d=>d._key===key);if(!d)return;
 const v=d.versements[idx];if(!v)return;
 if(!confirm("Supprimer ce versement ?"))return;
+// Supprimer la vente correspondante dans /sales si elle existe
+const matchingSale=getSales().find(s=>
+  s.productId==d.productId&&
+  s.date===v.date&&
+  s.qty===v.qtySold&&
+  (s.fromDepot||s.costPrice===s.salePrice*0.7)
+);
+if(matchingSale)await remove(ref(db,"sales/"+matchingSale._key));
 const versements=d.versements.filter((_,i)=>i!==idx);
 const newQtySold=Math.max(0,(+d.qtySold||0)-(+v.qtySold||0));
 const newStatus=((+d.qtyDeposited||0)-newQtySold-(+d.qtyReturned||0))<=0?"closed":"open";
 await set(ref(db,"depots/"+key),{...d,qtySold:newQtySold,versements,status:newStatus});
-alert("Versement supprime !");
-openRetourDepot(key);
+alert("✅ Versement supprimé !");
+render();
 }
 window.deleteVersement=deleteVersement;
 
