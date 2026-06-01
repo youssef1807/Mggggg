@@ -2491,6 +2491,11 @@ const html=`<div class="overlay" id="modal-reset" style="display:flex">
 <div class="sheet-handle"></div>
 <div class="sheet-header"><span class="sheet-title">⚙️ Paramètres Admin</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-reset');document.getElementById('modal-reset').remove()">✕</button></div>
 <div class="sheet-body">
+<div style="background:#3b82f614;border:1px solid #3b82f633;border-radius:12px;padding:14px;margin-bottom:10px">
+<div style="font-weight:800;font-size:13px;color:var(--blue);margin-bottom:6px">🧹 Nettoyer ventes dépôts en double</div>
+<div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6">Supprime les anciennes ventes de dépôts-vente dans /sales qui causent un double comptage.</div>
+<button class="btn btn-primary btn-full" onclick="cleanDepotSales()">🧹 Nettoyer maintenant</button>
+</div>
 <div style="background:#ef444414;border:1px solid #ef444433;border-radius:12px;padding:14px;margin-bottom:4px">
 <div style="font-weight:800;font-size:14px;color:var(--red);margin-bottom:6px">🗑️ Réinitialiser l'application</div>
 <div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.6">Efface <b>toutes les données</b> : produits, ventes, rapports, dépôts, crédits, commandes, caisse.<br>⚠️ Action irréversible.</div>
@@ -2511,6 +2516,22 @@ document.body.insertAdjacentHTML("beforeend",html);
 setTimeout(()=>document.getElementById("reset-pw")?.focus(),300);
 }
 window.openResetMenu=openResetMenu;
+
+async function cleanDepotSales(){
+if(!confirm("Supprimer toutes les ventes de dépôts-vente dans /sales ?\nLe bénéfice sera recalculé depuis les versements (× 70%)."))return;
+const sales=getSales();
+// Depot sales have fromDepot flag OR have costPrice calculated as 70% of salePrice
+const depotSaleKeys=sales.filter(s=>s.fromDepot||s.costPrice===s.salePrice*0.7).map(s=>s._key);
+if(!depotSaleKeys.length){alert("✅ Aucune vente de dépôt trouvée — déjà propre !");return;}
+for(const k of depotSaleKeys){
+  await remove(ref(db,"sales/"+k));
+}
+closeModal("modal-reset");
+document.getElementById("modal-reset")?.remove();
+alert("✅ "+depotSaleKeys.length+" vente(s) de dépôt supprimée(s) !");
+render();
+}
+window.cleanDepotSales=cleanDepotSales;
 
 async function confirmReset(){
 const pw=document.getElementById("reset-pw").value;
