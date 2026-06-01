@@ -1408,7 +1408,6 @@ const versements=[...(d.versements||[]),{date,qtySold:qty,montant}];
 const newQtySold=d.qtySold+qty;
 const newStatus=(d.qtyDeposited-newQtySold-d.qtyReturned)<=0?"closed":d.status;
 await set(ref(db,`depots/${key}`),{...d,qtySold:newQtySold,versements,status:newStatus});
-await fbAddSale({productId:+d.productId,productName:d.productName,qty,salePrice:montant/qty,costPrice:d.prixEstime?(d.prixEstime*0.7):0,type:"detail",date,profit:montant-(qty*(d.prixEstime?d.prixEstime*0.7:0))});
 closeModal("modal-retour-depot");
 alert("✅ Versement enregistré !");
 render();
@@ -2955,7 +2954,8 @@ const currentLabel=`${MONTHS_FULL[d.getMonth()]} ${d.getFullYear()}`;
 if(!fbLoaded){el.innerHTML=`<div class="loading">⏳ Chargement des données...</div>`;return;}
 
 if(currentTab==="dashboard"){
-const m=monthStats(mk),totalB=getSales().reduce((a,s)=>a+s.profit,0),low=getProducts().filter(p=>p.stock<=5);
+const m=monthStats(mk),low=getProducts().filter(p=>p.stock<=5);
+const totalB=getSales().reduce((a,s)=>a+s.profit,0)+getDepots().reduce((a,d)=>{return a+(d.versements||[]).reduce((b,v)=>b+(+v.montant||0)*0.7,0);},0);
 const capital=calcCapital();
 const capitalEngage=getCommandes().filter(c=>c.status==="en_attente").reduce((a,c)=>a+(+c.totalMontant||0),0);
 // Capital mobilisé = stock + caisse + dépôts (moitié prix) + crédits + commandes en attente
