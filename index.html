@@ -2066,10 +2066,14 @@ const html=`<div class="overlay" id="modal-commande" style="display:flex">
 <div class="field"><label>Date commande</label><input type="date" id="cmd-date" value="${today()}"/></div>
 ${lignesHTML}
 <div class="field"><label>Note (optionnel)</label><input type="text" id="cmd-note" placeholder="ex: Livraison sous 3 jours"/></div>
+<div style="background:#f59e0b14;border:1px solid #f59e0b33;border-radius:9px;padding:10px 12px;display:flex;align-items:center;gap:10px;cursor:pointer;margin-top:4px" onclick="const cb=document.getElementById('cmd-historique');cb.checked=!cb.checked;document.getElementById('btn-save-commande').textContent=cb.checked?'📬 Enregistrer (historique)':'📬 Commander → Débiter caisse'">
+<input type="checkbox" id="cmd-historique" style="width:18px;height:18px;accent-color:var(--amber);flex-shrink:0"/>
+<div><div style="font-size:12px;font-weight:700;color:var(--amber)">📦 Commande historique</div><div style="font-size:10px;color:var(--muted)">Ne pas débiter la caisse (commande déjà payée avant l'app)</div></div>
+</div>
 </div>
 <div class="sheet-footer">
 <button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-commande');document.getElementById('modal-commande').remove()">Annuler</button>
-<button class="btn btn-amber" style="flex:2" onclick="saveCommande()">📬 Commander → Débiter caisse</button>
+<button id="btn-save-commande" class="btn btn-amber" style="flex:2" onclick="saveCommande()">📬 Commander → Débiter caisse</button>
 </div>
 </div>
 </div>`;
@@ -2146,19 +2150,21 @@ for(const el of lignesEls){
   total+=qty*prix;
 }
 if(!lignes.length)return alert("Ajoute au moins un produit !");
-if(!confirm(`Commander pour ${cfa(total)} ?
-Ce montant sera débité de la caisse.`))return;
+const historique=document.getElementById("cmd-historique")?.checked||false;
+if(!confirm(`Commander pour ${cfa(total)} ?${historique?"\n📦 Commande historique — caisse non débitée":"\nCe montant sera débité de la caisse."}`))return;
 
 const k=push(ref(db,"commandes")).key;
-await set(ref(db,"commandes/"+k),{_key:k,fournisseur,date,note,lignes,totalMontant:total,status:"en_attente"});
+await set(ref(db,"commandes/"+k),{_key:k,fournisseur,date,note,lignes,totalMontant:total,status:"en_attente",historique});
 
+if(!historique){
 // Enregistrer comme sortie de caisse
 const ak=push(ref(db,"caisseConfig/apports")).key;
 await set(ref(db,"caisseConfig/apports/"+ak),{_key:ak,montant:-total,date,note:"📬 Commande: "+(fournisseur||"Fournisseur")});
+}
 
 closeModal("modal-commande");
 document.getElementById("modal-commande")?.remove();
-alert("✅ Commande enregistrée !\n💸 "+cfa(total)+" débités de la caisse.");
+alert("✅ Commande enregistrée !"+(historique?"\n📦 Caisse non débitée.":"\n💸 "+cfa(total)+" débités de la caisse."));
 render();
 }
 window.saveCommande=saveCommande;
