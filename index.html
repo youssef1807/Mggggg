@@ -1179,12 +1179,34 @@ window.saveEditRapport=saveEditRapport;
 function monthStats(key){
 const ms=getSales().filter(s=>s.date&&s.date.startsWith(key));
 const g=ms.filter(s=>s.type==="gros"),d=ms.filter(s=>s.type==="detail");
-return{profit:ms.reduce((a,s)=>a+s.profit,0),ca:ms.reduce((a,s)=>a+s.qty*s.salePrice,0),benefGros:g.reduce((a,s)=>a+s.profit,0),benefDetail:d.reduce((a,s)=>a+s.profit,0),unitsGros:g.reduce((a,s)=>a+s.qty,0),unitsDetail:d.reduce((a,s)=>a+s.qty,0),countGros:g.length,countDetail:d.length,units:ms.reduce((a,s)=>a+s.qty,0),count:ms.length};
+// Ajouter les versements dépôts (bénéfice = 70% du versement)
+const versementsMois=[];
+getDepots().forEach(dep=>{
+  (dep.versements||[]).forEach(v=>{
+    if(v.date&&v.date.startsWith(key))versementsMois.push(v);
+  });
+});
+const benefDepots=versementsMois.reduce((a,v)=>a+(+v.montant||0)*0.7,0);
+const profitVentes=ms.reduce((a,s)=>a+s.profit,0);
+return{
+  profit:profitVentes+benefDepots,
+  profitVentes,
+  benefDepots,
+  ca:ms.reduce((a,s)=>a+s.qty*s.salePrice,0),
+  benefGros:g.reduce((a,s)=>a+s.profit,0),
+  benefDetail:d.reduce((a,s)=>a+s.profit,0),
+  unitsGros:g.reduce((a,s)=>a+s.qty,0),
+  unitsDetail:d.reduce((a,s)=>a+s.qty,0),
+  countGros:g.length,
+  countDetail:d.length,
+  units:ms.reduce((a,s)=>a+s.qty,0),
+  count:ms.length
+};
 }
 
 function monthCardHtml(key,label,isCurrent){
 const m=monthStats(key);const fw=pct(m.benefGros,m.benefDetail);
-return`<div class="month-card"><div class="month-card-head"><span class="month-card-title">${label}</span>${isCurrent?tag("En cours","green"):""}</div><div class="month-benef-row"><div class="benef-block benef-block-gros"><div class="benef-block-lbl" style="color:var(--violet)">⬡ Gros</div><div class="benef-block-val" style="color:var(--violet)">${cfa(m.benefGros)}</div><div class="benef-block-sub" style="color:var(--violet)">${m.unitsGros} unités · ${m.countGros} ventes</div></div><div class="benef-block benef-block-detail"><div class="benef-block-lbl" style="color:var(--blue)">◎ Détail</div><div class="benef-block-val" style="color:var(--blue)">${cfa(m.benefDetail)}</div><div class="benef-block-sub" style="color:var(--blue)">${m.unitsDetail} unités · ${m.countDetail} ventes</div></div></div><div class="benef-total-row"><span class="benef-total-lbl">💰 Bénéfice total du mois</span><span class="benef-total-val">${cfa(m.profit)}</span></div>${(m.benefGros>0||m.benefDetail>0)?`<div class="split-bar" style="margin-top:10px"><div class="split-bar-fill" style="width:${fw}%"></div></div><div style="display:flex;justify-content:space-between;margin-top:4px;font-size:9px"><span style="color:var(--violet)">Gros ${fw}%</span><span style="color:var(--blue)">Détail ${100-fw}%</span></div>`:""}</div>`;
+return`<div class="month-card"><div class="month-card-head"><span class="month-card-title">${label}</span>${isCurrent?tag("En cours","green"):""}</div><div class="month-benef-row"><div class="benef-block benef-block-gros"><div class="benef-block-lbl" style="color:var(--violet)">⬡ Gros</div><div class="benef-block-val" style="color:var(--violet)">${cfa(m.benefGros)}</div><div class="benef-block-sub" style="color:var(--violet)">${m.unitsGros} unités · ${m.countGros} ventes</div></div><div class="benef-block benef-block-detail"><div class="benef-block-lbl" style="color:var(--blue)">◎ Détail</div><div class="benef-block-val" style="color:var(--blue)">${cfa(m.benefDetail)}</div><div class="benef-block-sub" style="color:var(--blue)">${m.unitsDetail} unités · ${m.countDetail} ventes</div></div></div>${m.benefDepots>0?`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--border);margin-top:4px"><span style="font-size:11px;color:var(--amber)">🏪 Dépôts-vente (70% versements)</span><span style="font-family:monospace;font-size:12px;font-weight:700;color:var(--amber)">+${cfa(Math.round(m.benefDepots))}</span></div>`:""}<div class="benef-total-row"><span class="benef-total-lbl">💰 Bénéfice total du mois</span><span class="benef-total-val">${cfa(Math.round(m.profit))}</span></div>${(m.benefGros>0||m.benefDetail>0)?`<div class="split-bar" style="margin-top:10px"><div class="split-bar-fill" style="width:${fw}%"></div></div><div style="display:flex;justify-content:space-between;margin-top:4px;font-size:9px"><span style="color:var(--violet)">Gros ${fw}%</span><span style="color:var(--blue)">Détail ${100-fw}%</span></div>`:""}</div>`;
 }
 
 function calcCapital(){return getProducts().reduce((a,p)=>a+(p.stock*p.costPrice),0);}
