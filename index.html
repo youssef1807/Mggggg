@@ -2538,24 +2538,13 @@ const html=`<div class="overlay" id="modal-reset" style="display:flex">
 <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6">Supprime les anciennes ventes de dépôts-vente dans /sales qui causent un double comptage.</div>
 <button class="btn btn-primary btn-full" onclick="cleanDepotSales()">🧹 Nettoyer maintenant</button>
 </div>
-<div style="background:#ef444414;border:1px solid #ef444433;border-radius:12px;padding:14px;margin-bottom:4px">
-<div style="font-weight:800;font-size:14px;color:var(--red);margin-bottom:6px">🗑️ Réinitialiser l'application</div>
-<div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.6">Efface <b>toutes les données</b> : produits, ventes, rapports, dépôts, crédits, commandes, caisse.<br>⚠️ Action irréversible.</div>
-<div class="field">
-<label>Confirme avec ton mot de passe Admin</label>
-<input type="password" id="reset-pw" placeholder="••••••••••" style="letter-spacing:3px"/>
-</div>
-<div style="color:var(--red);font-size:11px;font-weight:700;min-height:16px;margin-top:4px" id="reset-err"></div>
-</div>
 </div>
 <div class="sheet-footer">
-<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-reset');document.getElementById('modal-reset').remove()">Annuler</button>
-<button class="btn btn-red" style="flex:2" onclick="confirmReset()">🗑️ Réinitialiser</button>
+<button class="btn btn-ghost btn-full" onclick="closeModal('modal-reset');document.getElementById('modal-reset').remove()">Fermer</button>
 </div>
 </div>
 </div>`;
 document.body.insertAdjacentHTML("beforeend",html);
-setTimeout(()=>document.getElementById("reset-pw")?.focus(),300);
 }
 window.openResetMenu=openResetMenu;
 
@@ -2575,39 +2564,7 @@ render();
 }
 window.cleanDepotSales=cleanDepotSales;
 
-async function confirmReset(){
-const pw=document.getElementById("reset-pw").value;
-const err=document.getElementById("reset-err");
-if(pw!==PW_ADMIN){
-  err.textContent="❌ Mot de passe incorrect.";
-  document.getElementById("reset-pw").value="";
-  return;
-}
-closeModal("modal-reset");
-document.getElementById("modal-reset")?.remove();
 
-// Double confirmation
-if(!confirm("DERNIÈRE CONFIRMATION\nToutes les données seront effacées définitivement. Continuer ?"))return;
-
-// Show loading
-const overlay=document.getElementById("scan-overlay");
-const status=document.getElementById("scan-status");
-if(overlay){overlay.style.display="flex";status.textContent="🗑️ Réinitialisation en cours...";}
-
-try{
-  const paths=["products","sales","rapports","moves","depots","depenses","credits","commandes","caisseConfig","retraits"];
-  for(const path of paths){
-    await remove(ref(db,path));
-  }
-  if(overlay)overlay.style.display="none";
-  alert("✅ Application réinitialisée !\nPrête pour une nouvelle utilisation.");
-  logout();
-}catch(e){
-  if(overlay)overlay.style.display="none";
-  alert("❌ Erreur: "+e.message);
-}
-}
-window.confirmReset=confirmReset;
 
 function closeMoreMenu(){
 const m=document.getElementById("more-menu");
