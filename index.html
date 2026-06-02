@@ -2105,7 +2105,7 @@ ${tag(isEnAttente?"🚚 En attente":"✅ Reçue",isEnAttente?"amber":"green")}
 </div>
 <div style="margin-bottom:10px">
 ${lignes.map(l=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
-<span style="font-weight:600">${l.produit} × ${l.qty}</span>
+<span style="font-weight:600">${l.produit||l.produitNom||"Produit sans nom"} × ${l.qty}</span>
 <span style="font-family:monospace">${cfa(l.prixRevient*l.qty)}</span>
 </div>`).join("")}
 <div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:800">
@@ -2209,12 +2209,14 @@ for(const el of lignesEls){
   if(!qty||!prix)continue;
   let produitId=select.value;
   let produitNom="";
-  if(produitId==="__nouveau__"){
-    produitNom=nomEl?.value.trim()||"Nouveau produit";
+  if(produitId==="__nouveau__"||produitId===""){
+    const nomSaisi=nomEl?.value.trim();
+    if(!nomSaisi){alert("⚠️ Saisis le nom du nouveau produit avant de valider !");return;}
+    produitNom=nomSaisi;
     produitId=null;
   }else{
     const p=getP(produitId);
-    produitNom=p?p.name:select.options[select.selectedIndex]?.text||"?";
+    produitNom=p?p.name:(select.options[select.selectedIndex]?.dataset?.nom||select.options[select.selectedIndex]?.text||"?");
   }
   lignes.push({produitId:produitId||null,produit:produitNom,qty,prixRevient:prix});
   total+=qty*prix;
@@ -2250,7 +2252,7 @@ const html=`<div class="overlay" id="modal-reception" style="display:flex">
 <div style="background:var(--bg);border-radius:10px;padding:12px;margin-bottom:12px">
 <div style="font-weight:800;font-size:13px;margin-bottom:8px">${c.fournisseur||"Commande"}</div>
 ${(c.lignes||[]).map(l=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">
-<span>${l.produit} × ${l.qty}</span><span style="font-family:monospace">${cfa(l.prixRevient*l.qty)}</span>
+<span>${l.produit||l.produitNom||"Produit sans nom"} × ${l.qty}</span><span style="font-family:monospace">${cfa(l.prixRevient*l.qty)}</span>
 </div>`).join("")}
 <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:800;padding:8px 0 0">
 <span>Total payé fournisseur</span><span style="font-family:monospace;color:var(--amber)">${cfa(+c.totalMontant||0)}</span>
@@ -2333,7 +2335,7 @@ let lignesHTML=lignes.map((l,i)=>`<div id="edit-ligne-${i}" style="background:va
 <button onclick="document.getElementById('edit-ligne-${i}').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px">✕</button>
 </div>
 <div class="field" style="margin-bottom:8px"><select class="cmd-produit-select" onchange="onCmdProduitChange(this,'edit-ligne-${i}')">${prodOptions(l.produitId)}</select></div>
-<div id="edit-ligne-${i}-nom-field" style="display:none" class="field" style="margin-bottom:8px"><label>Nom</label><input type="text" class="cmd-nouveau-nom" value="${l.produit||""}"/></div>
+<div id="edit-ligne-${i}-nom-field" style="display:${!l.produitId?"block":"none"}" class="field" style="margin-bottom:8px"><label>Nom du produit</label><input type="text" class="cmd-nouveau-nom" value="${l.produit||""}"/></div>
 <div class="grid2" style="gap:8px">
 <div class="field"><label>Quantité</label><input type="number" class="cmd-qty" min="1" value="${l.qty||1}"/></div>
 <div class="field"><label>Prix/u (F)</label><input type="number" class="cmd-prix" min="0" value="${l.prixRevient||0}"/></div>
@@ -2380,12 +2382,14 @@ for(const el of lignesEls){
   if(!qty||!prix)continue;
   let produitId=select.value;
   let produitNom="";
-  if(produitId==="__nouveau__"){
-    produitNom=nomEl?.value.trim()||"Nouveau produit";
+  if(produitId==="__nouveau__"||produitId===""){
+    const nomSaisi=nomEl?.value.trim();
+    if(!nomSaisi){alert("⚠️ Saisis le nom du nouveau produit avant de valider !");return;}
+    produitNom=nomSaisi;
     produitId=null;
   }else{
     const p=getP(produitId);
-    produitNom=p?p.name:select.options[select.selectedIndex]?.text||"?";
+    produitNom=p?p.name:(select.options[select.selectedIndex]?.dataset?.nom||select.options[select.selectedIndex]?.text||"?");
   }
   lignes.push({produitId:produitId||null,produit:produitNom,qty,prixRevient:prix});
   total+=qty*prix;
@@ -2538,13 +2542,24 @@ const html=`<div class="overlay" id="modal-reset" style="display:flex">
 <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6">Supprime les anciennes ventes de dépôts-vente dans /sales qui causent un double comptage.</div>
 <button class="btn btn-primary btn-full" onclick="cleanDepotSales()">🧹 Nettoyer maintenant</button>
 </div>
+<div style="background:#ef444414;border:1px solid #ef444433;border-radius:12px;padding:14px;margin-bottom:4px">
+<div style="font-weight:800;font-size:14px;color:var(--red);margin-bottom:6px">🗑️ Réinitialiser l'application</div>
+<div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.6">Efface <b>toutes les données</b> : produits, ventes, rapports, dépôts, crédits, commandes, caisse.<br>⚠️ Action irréversible.</div>
+<div class="field">
+<label>Confirme avec ton mot de passe Admin</label>
+<input type="password" id="reset-pw" placeholder="••••••••••" style="letter-spacing:3px"/>
+</div>
+<div style="color:var(--red);font-size:11px;font-weight:700;min-height:16px;margin-top:4px" id="reset-err"></div>
+</div>
 </div>
 <div class="sheet-footer">
-<button class="btn btn-ghost btn-full" onclick="closeModal('modal-reset');document.getElementById('modal-reset').remove()">Fermer</button>
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-reset');document.getElementById('modal-reset').remove()">Annuler</button>
+<button class="btn btn-red" style="flex:2" onclick="confirmReset()">🗑️ Réinitialiser</button>
 </div>
 </div>
 </div>`;
 document.body.insertAdjacentHTML("beforeend",html);
+setTimeout(()=>document.getElementById("reset-pw")?.focus(),300);
 }
 window.openResetMenu=openResetMenu;
 
@@ -2564,7 +2579,39 @@ render();
 }
 window.cleanDepotSales=cleanDepotSales;
 
+async function confirmReset(){
+const pw=document.getElementById("reset-pw").value;
+const err=document.getElementById("reset-err");
+if(pw!==PW_ADMIN){
+  err.textContent="❌ Mot de passe incorrect.";
+  document.getElementById("reset-pw").value="";
+  return;
+}
+closeModal("modal-reset");
+document.getElementById("modal-reset")?.remove();
 
+// Double confirmation
+if(!confirm("DERNIÈRE CONFIRMATION\nToutes les données seront effacées définitivement. Continuer ?"))return;
+
+// Show loading
+const overlay=document.getElementById("scan-overlay");
+const status=document.getElementById("scan-status");
+if(overlay){overlay.style.display="flex";status.textContent="🗑️ Réinitialisation en cours...";}
+
+try{
+  const paths=["products","sales","rapports","moves","depots","depenses","credits","commandes","caisseConfig","retraits"];
+  for(const path of paths){
+    await remove(ref(db,path));
+  }
+  if(overlay)overlay.style.display="none";
+  alert("✅ Application réinitialisée !\nPrête pour une nouvelle utilisation.");
+  logout();
+}catch(e){
+  if(overlay)overlay.style.display="none";
+  alert("❌ Erreur: "+e.message);
+}
+}
+window.confirmReset=confirmReset;
 
 function closeMoreMenu(){
 const m=document.getElementById("more-menu");
