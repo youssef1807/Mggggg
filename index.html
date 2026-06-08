@@ -1250,17 +1250,23 @@ await fbRemoveMovesByDateOut(r.date);
 const ventesF=editVentes.map(v=>{const p=getP(v.productId);const isGift=v.price===0;return{...v,productName:p?p.name:v.productName,costPrice:p?p.costPrice:v.costPrice,profit:isGift?-(p?p.costPrice:v.costPrice)*v.qty:(v.price-(p?p.costPrice:v.costPrice))*v.qty,isGift};});
 for(const v of ventesF){const p=getP(v.productId);if(p){await fbSetProduct({...p,stock:p.stock-v.qty});await fbAddMove({productId:p.id,productName:p.name,type:"out",qty:v.qty,date:r.date,note:"Vente modifiée"});}}
 for(const v of ventesF.filter(v=>!v.isGift)){await fbAddSale({productId:+v.productId,productName:v.productName,qty:v.qty,salePrice:v.price,costPrice:v.costPrice,type:v.type,date:r.date,profit:v.profit,isCredit:!!v.isCredit});}
-const ventesCredit=ventesF.filter(v=>v.isCredit&&!v.isGift);
-for(const vc of ventesCredit){
+
+// Crédits : seulement les ventes qui N'ÉTAIENT PAS déjà à crédit avant
+const ventesAvant=(r.ventes||[]).filter(v=>v.isCredit&&!v.isGift);
+const ventesApres=ventesF.filter(v=>v.isCredit&&!v.isGift);
+// Nouvelles ventes à crédit = celles qui n'avaient pas isCredit=true avant (comparaison par id)
+const ventesAvantIds=new Set(ventesAvant.map(v=>v.id));
+const nouvellesVentesCredit=ventesApres.filter(v=>!ventesAvantIds.has(v.id));
+for(const vc of nouvellesVentesCredit){
   const montant=(vc.price||0)*(vc.qty||0);if(!montant)continue;
   if(vc.creditKey&&vc.creditKey!=="__nouveau__"){
     const c=getCredits().find(c=>c._key===vc.creditKey);
-    if(c)await set(ref(db,"credits/"+c._key),{...c,montantInitial:(+c.montantInitial||0)+montant,montantRestant:(+c.montantRestant||0)+montant,historique:[...(c.historique||[]),{date:r.date,montant,note:"Rapport modifié"}],status:"en cours"});
+    if(c)await set(ref(db,"credits/"+c._key),{...c,montantInitial:(+c.montantInitial||0)+montant,montantRestant:(+c.montantRestant||0)+montant,historique:[...(c.historique||[]),{date:r.date,montant,note:"Ajout crédit rapport"}],status:"en cours"});
   }else{
     const nom=(vc.clientCredit||"").trim();
     const doublon=nom?getCredits().find(c=>c.client&&c.client.trim().toLowerCase()===nom.toLowerCase()):null;
-    if(doublon)await set(ref(db,"credits/"+doublon._key),{...doublon,montantInitial:(+doublon.montantInitial||0)+montant,montantRestant:(+doublon.montantRestant||0)+montant,historique:[...(doublon.historique||[]),{date:r.date,montant,note:"Rapport modifié"}],status:"en cours"});
-    else if(nom){const k=push(ref(db,"credits")).key;await set(ref(db,"credits/"+k),{_key:k,client:nom,montantInitial:montant,montantRestant:montant,date:r.date,note:"",status:"en cours",remboursements:[],historique:[{date:r.date,montant,note:"Depuis rapport modifié"}],fromRapport:true});}
+    if(doublon)await set(ref(db,"credits/"+doublon._key),{...doublon,montantInitial:(+doublon.montantInitial||0)+montant,montantRestant:(+doublon.montantRestant||0)+montant,historique:[...(doublon.historique||[]),{date:r.date,montant,note:"Ajout crédit rapport"}],status:"en cours"});
+    else if(nom){const k=push(ref(db,"credits")).key;await set(ref(db,"credits/"+k),{_key:k,client:nom,montantInitial:montant,montantRestant:montant,date:r.date,note:"",status:"en cours",remboursements:[],historique:[{date:r.date,montant,note:"Rapport modifié"}],fromRapport:true});}
   }
 }
 await fbUpdateRapport(editingRapportId,{...r,ventes:ventesF,totals:calcTotals(ventesF)});
@@ -2073,15 +2079,13 @@ Object.values(allDays).forEach(day=>{
 const soldeActuel=soldeDepart+totalEntrees-totalSorties;
 window._soldeCaisseActuel=soldeActuel;
 
-// Calcul solde de fin de journée pour chaque date (du plus ancien au plus récent)
+// Solde de fin de journée cumulé
 const sortedAsc=[...sortedDates].sort((a,b)=>a.localeCompare(b));
 const soldeFin={};
 let soldeCumul=soldeDepart;
 sortedAsc.forEach(date=>{
   const day=allDays[date];
-  const e=day.entrees.reduce((a,x)=>a+x.montant,0);
-  const s=day.sorties.reduce((a,x)=>a+x.montant,0);
-  soldeCumul+=e-s;
+  soldeCumul+=day.entrees.reduce((a,e)=>a+e.montant,0)-day.sorties.reduce((a,s)=>a+s.montant,0);
   soldeFin[date]=soldeCumul;
 });
 
