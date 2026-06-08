@@ -248,7 +248,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Syne',
 <div style="font-size:14px;font-weight:700;text-align:center" id="scan-status">🤖 L'IA analyse votre cahier...</div>
 <div style="font-size:11px;color:var(--muted);text-align:center">Détection des ventes en cours</div>
 </div>
-<input type="file" id="photo-input" accept="image/*" style="display:none" onchange="handlePhoto(event)"/>
+<input type="file" id="photo-input" accept="image/*" capture="environment" style="display:none" onchange="handlePhoto(event)"/>
 <!-- MODAL STOCK IN -->
 <div class="overlay" id="modal-stock-in" style="display:none">
 <div class="sheet">
@@ -873,8 +873,7 @@ ${v.isCredit?`<div class="field"><label>Client</label>
 <select onchange="selectClientCredit(${v.id},this.value)" style="margin-bottom:6px">
 <option value="">— Choisir ou créer —</option>
 <option value="__nouveau__">➕ Nouveau client</option>
-${getCredits().filter(c=>c.status!=="soldé").length>0?`<optgroup label="En cours">${getCredits().filter(c=>c.status!=="soldé").map(c=>`<option value="${c._key}" ${v.creditKey===c._key?"selected":""}>${c.client} (doit ${cfa(+c.montantRestant||0)})</option>`).join("")}</optgroup>`:""}
-${getCredits().filter(c=>c.status==="soldé").length>0?`<optgroup label="Soldés (relancer)">${getCredits().filter(c=>c.status==="soldé").map(c=>`<option value="${c._key}" ${v.creditKey===c._key?"selected":""}>${c.client} (soldé)</option>`).join("")}</optgroup>`:""}
+${getCredits().filter(c=>c.status!=="soldé").map(c=>`<option value="${c._key}" ${v.creditKey===c._key?"selected":""}>${c.client} (doit ${cfa(+c.montantRestant||0)})</option>`).join("")}
 </select>
 ${v.creditKey==="__nouveau__"||(!v.creditKey&&v.clientCredit)?`<input type="text" value="${v.clientCredit||""}" placeholder="Nom du nouveau client" oninput="updateVente(${v.id},'clientCredit',this.value)" style="margin-top:4px"/>`:""}`:""}
 </div>`:""}
@@ -967,17 +966,9 @@ if(v.creditKey&&v.creditKey!=="__nouveau__"){
   await set(ref(db,"credits/"+existing._key),{...existing,montantInitial:newMontantInitial,montantRestant:newMontantRestant,historique,status:"en cours"});
   }
 }else{
-  const nomClient=(v.clientCredit||"").trim().toLowerCase();
-  const doublon=nomClient?getCredits().find(c=>c.client&&c.client.trim().toLowerCase()===nomClient):null;
-  if(doublon){
-    const newMontantInitial=(+doublon.montantInitial||0)+montant;
-    const newMontantRestant=(+doublon.montantRestant||0)+montant;
-    const historique=[...(doublon.historique||[]),{date:dateStr,montant,note:noteVente}];
-    await set(ref(db,"credits/"+doublon._key),{...doublon,montantInitial:newMontantInitial,montantRestant:newMontantRestant,historique,status:"en cours"});
-  }else{
-    const k=push(ref(db,"credits")).key;
-    await set(ref(db,"credits/"+k),{_key:k,client:v.clientCredit||"Client inconnu",montantInitial:montant,montantRestant:montant,date:dateStr,note:noteVente,status:"en cours",remboursements:[],historique:[{date:dateStr,montant,note:noteVente}],fromRapport:true});
-  }
+  // Nouveau crédit
+  const k=push(ref(db,"credits")).key;
+  await set(ref(db,"credits/"+k),{_key:k,client:v.clientCredit||"Client inconnu",montantInitial:montant,montantRestant:montant,date:dateStr,note:noteVente,status:"en cours",remboursements:[],historique:[{date:dateStr,montant,note:noteVente}],fromRapport:true});
 }
 }
 currentRapport={ventes:[]};rapportMode="choose";rapportDate=new Date().toISOString().slice(0,10);
@@ -1006,27 +997,7 @@ alert("✅ Journée sans vente enregistrée.");render();
 }
 window.validerJourneeVide=validerJourneeVide;
 
-function triggerPhoto(){
-const existing=document.getElementById("modal-photo-choice");
-if(existing)existing.remove();
-const html=`<div class="overlay" id="modal-photo-choice" style="display:flex" onclick="if(event.target===this){this.remove()}">
-<div class="sheet" style="padding-bottom:env(safe-area-inset-bottom)">
-<div class="sheet-handle"></div>
-<div class="sheet-header"><span class="sheet-title">📷 Scanner le cahier</span><button class="btn btn-ghost btn-sm" onclick="document.getElementById('modal-photo-choice').remove()">✕</button></div>
-<div class="sheet-body" style="display:flex;flex-direction:column;gap:12px;padding-bottom:16px">
-<button class="btn btn-full" style="background:#0ea5e914;border:1px solid #0ea5e944;color:#38bdf8;font-size:15px;padding:18px;border-radius:14px;display:flex;align-items:center;gap:12px" onclick="document.getElementById('modal-photo-choice').remove();document.getElementById('photo-input').click()">
-<span style="font-size:28px">📷</span>
-<div style="text-align:left"><div style="font-weight:800">Prendre une photo</div><div style="font-size:11px;opacity:.7;margin-top:2px">Ouvrir la caméra maintenant</div></div>
-</button>
-<button class="btn btn-full" style="background:#8b5cf614;border:1px solid #8b5cf644;color:#a78bfa;font-size:15px;padding:18px;border-radius:14px;display:flex;align-items:center;gap:12px" onclick="document.getElementById('modal-photo-choice').remove();document.getElementById('photo-input').click()">
-<span style="font-size:28px">🖼️</span>
-<div style="text-align:left"><div style="font-weight:800">Choisir depuis la galerie</div><div style="font-size:11px;opacity:.7;margin-top:2px">Sélectionner une photo existante</div></div>
-</button>
-</div>
-</div>
-</div>`;
-document.body.insertAdjacentHTML("beforeend",html);
-}
+function triggerPhoto(){document.getElementById("photo-input").click();}
 window.triggerPhoto=triggerPhoto;
 
 async function handlePhoto(event){
@@ -1199,12 +1170,25 @@ render();
 window.deleteRapport=deleteRapport;
 
 function renderEditRapport(){
-function evHtml(v){return`<div class="vente-item" style="margin-bottom:8px"><div class="vente-item-head"><span style="font-size:10px;color:var(--muted);font-weight:700">${v.type==="gros"?"⬡ GROS":"◎ DÉTAIL"}</span><button class="vente-remove" onclick="removeEditVente(${v.id})">✕</button></div><div class="field" style="margin-bottom:8px"><label>Produit</label><select onchange="updateEditVente(${v.id},'productId',this.value)">${prodOptions(v.productId)}</select></div><div class="grid2"><div class="field"><label>Quantité</label><input type="number" min="1" value="${v.qty}" oninput="updateEditVente(${v.id},'qty',this.value)"/></div><div class="field"><label>Prix/u (F)</label><input type="number" min="0" value="${v.price}" oninput="updateEditVente(${v.id},'price',this.value)"/></div></div></div>`;}
+function evHtml(v){return`<div class="vente-item" style="margin-bottom:8px"><div class="vente-item-head"><span style="font-size:10px;color:var(--muted);font-weight:700">${v.type==="gros"?"⬡ GROS":"◎ DÉTAIL"}</span><button class="vente-remove" onclick="removeEditVente(${v.id})">✕</button></div><div class="field" style="margin-bottom:8px"><label>Produit</label><select onchange="updateEditVente(${v.id},'productId',this.value)">${prodOptions(v.productId)}</select></div><div class="grid2"><div class="field"><label>Quantité</label><input type="number" min="1" value="${v.qty}" oninput="updateEditVente(${v.id},'qty',this.value)"/></div><div class="field"><label>Prix/u (F)</label><input type="number" min="0" value="${v.price}" oninput="updateEditVente(${v.id},'price',this.value)"/></div></div><div style="margin-top:8px;background:${v.isCredit?"#3b82f614":"var(--bg)"};border:1px solid ${v.isCredit?"#3b82f633":"var(--border)"};border-radius:9px;padding:10px 12px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:${v.isCredit?8:0}px"><input type="checkbox" id="ev-cr-${v.id}" ${v.isCredit?"checked":""} onchange="updateEditVenteCredit(${v.id},this.checked)" style="width:18px;height:18px;cursor:pointer"/><label for="ev-cr-${v.id}" style="font-size:13px;font-weight:600;cursor:pointer">🤝 Vente à crédit</label></div>${v.isCredit?`<div class="field"><label>Client</label><select onchange="updateEditVente(${v.id},'creditKey',this.value);updateEditVenteCreditKey(${v.id},this.value)"><option value="">— Choisir ou créer —</option><option value="__nouveau__">➕ Nouveau client</option>${getCredits().filter(c=>c.status!=="soldé").length>0?`<optgroup label="En cours">${getCredits().filter(c=>c.status!=="soldé").map(c=>`<option value="${c._key}" ${v.creditKey===c._key?"selected":""}>${c.client} (doit ${cfa(+c.montantRestant||0)})</option>`).join("")}</optgroup>`:""}${getCredits().filter(c=>c.status==="soldé").length>0?`<optgroup label="Soldés (relancer)">${getCredits().filter(c=>c.status==="soldé").map(c=>`<option value="${c._key}" ${v.creditKey===c._key?"selected":""}>${c.client} (soldé)</option>`).join("")}</optgroup>`:""}${!v.creditKey||v.creditKey==="__nouveau__"?`<option value="__nouveau__" selected>➕ Nouveau client</option>`:""}</select></div>${!v.creditKey||v.creditKey==="__nouveau__"?`<div class="field"><input type="text" placeholder="Nom du client" value="${v.clientCredit||""}" oninput="updateEditVente(${v.id},'clientCredit',this.value)"/></div>`:""}`:""}  </div></div>`;}
 document.getElementById("mer-body").innerHTML=`<div style="background:#f59e0b14;border:1px solid #f59e0b33;border-radius:9px;padding:10px 12px;font-size:11px;color:var(--amber);margin-bottom:4px">⚠️ Modification recalcule le stock et bénéfices.</div><div style="font-size:11px;font-weight:800;color:var(--violet);margin-bottom:6px">⬡ GROS</div>${editVentes.filter(v=>v.type==="gros").map(evHtml).join("")}<button class="btn btn-violet btn-sm btn-full" onclick="addEditVente('gros')" style="margin-bottom:12px">+ Ajouter gros</button><div style="font-size:11px;font-weight:800;color:var(--blue);margin-bottom:6px">◎ DÉTAIL</div>${editVentes.filter(v=>v.type==="detail").map(evHtml).join("")}<button class="btn btn-primary btn-sm btn-full" onclick="addEditVente('detail')">+ Ajouter détail</button>`;
 document.getElementById("mer-footer").innerHTML=`<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-edit-rapport')">Annuler</button><button class="btn btn-green" style="flex:2" onclick="saveEditRapport()">✅ Sauvegarder</button>`;
 }
 
-function addEditVente(type){editVentes.push({id:Date.now(),productId:"",qty:1,price:0,type,isGift:false});renderEditRapport();}
+function updateEditVenteCredit(id,checked){
+const v=editVentes.find(v=>v.id===id);if(!v)return;
+v.isCredit=checked;
+if(!checked){v.clientCredit="";v.creditKey="";}
+renderEditRapport();
+}
+window.updateEditVenteCredit=updateEditVenteCredit;
+function updateEditVenteCreditKey(id,val){
+const v=editVentes.find(v=>v.id===id);if(!v)return;
+if(val==="__nouveau__"||val===""){v.creditKey="";v.clientCredit="";}
+else{const c=getCredits().find(c=>c._key===val);v.creditKey=val;v.clientCredit=c?c.client:"";}
+renderEditRapport();
+}
+window.updateEditVenteCreditKey=updateEditVenteCreditKey;
 window.addEditVente=addEditVente;
 function removeEditVente(id){editVentes=editVentes.filter(v=>v.id!==id);renderEditRapport();}
 window.removeEditVente=removeEditVente;
@@ -1226,7 +1210,23 @@ await fbRemoveSalesByDate(r.date);
 await fbRemoveMovesByDateOut(r.date);
 const ventesF=editVentes.map(v=>{const p=getP(v.productId);const isGift=v.price===0;return{...v,productName:p?p.name:v.productName,costPrice:p?p.costPrice:v.costPrice,profit:isGift?-(p?p.costPrice:v.costPrice)*v.qty:(v.price-(p?p.costPrice:v.costPrice))*v.qty,isGift};});
 for(const v of ventesF){const p=getP(v.productId);if(p){await fbSetProduct({...p,stock:p.stock-v.qty});await fbAddMove({productId:p.id,productName:p.name,type:"out",qty:v.qty,date:r.date,note:"Vente modifiée"});}}
-for(const v of ventesF.filter(v=>!v.isGift)){await fbAddSale({productId:+v.productId,productName:v.productName,qty:v.qty,salePrice:v.price,costPrice:v.costPrice,type:v.type,date:r.date,profit:v.profit});}
+for(const v of ventesF.filter(v=>!v.isGift)){await fbAddSale({productId:+v.productId,productName:v.productName,qty:v.qty,salePrice:v.price,costPrice:v.costPrice,type:v.type,date:r.date,profit:v.profit,isCredit:!!v.isCredit});}
+// Créer/mettre à jour les crédits si vente à crédit
+const ventesCredit=ventesF.filter(v=>v.isCredit&&!v.isGift);
+for(const v of ventesCredit){
+  const montant=(v.price||0)*(v.qty||0);
+  if(!montant)continue;
+  if(v.creditKey&&v.creditKey!=="__nouveau__"){
+    const c=getCredits().find(c=>c._key===v.creditKey);
+    if(c){const newR=(+c.montantRestant||0)+montant;await set(ref(db,"credits/"+c._key),{...c,montantInitial:(+c.montantInitial||0)+montant,montantRestant:newR,historique:[...(c.historique||[]),{date:r.date,montant,note:"Ajout depuis rapport modifié"}],status:"en cours"});}
+  }else{
+    const nomClient=(v.clientCredit||"").trim();
+    const nomL=nomClient.toLowerCase();
+    const doublon=nomL?getCredits().find(c=>c.client&&c.client.trim().toLowerCase()===nomL):null;
+    if(doublon){await set(ref(db,"credits/"+doublon._key),{...doublon,montantInitial:(+doublon.montantInitial||0)+montant,montantRestant:(+doublon.montantRestant||0)+montant,historique:[...(doublon.historique||[]),{date:r.date,montant,note:"Ajout depuis rapport modifié"}],status:"en cours"});}
+    else if(nomClient){const k=push(ref(db,"credits")).key;await set(ref(db,"credits/"+k),{_key:k,client:nomClient,montantInitial:montant,montantRestant:montant,date:r.date,note:"",status:"en cours",remboursements:[],historique:[{date:r.date,montant,note:"Depuis rapport modifié"}],fromRapport:true});}
+  }
+}
 await fbUpdateRapport(editingRapportId,{...r,ventes:ventesF,totals:calcTotals(ventesF)});
 closeModal("modal-edit-rapport");alert("✅ Rapport modifié !");render();
 }
@@ -1670,41 +1670,6 @@ window.saveDepense=saveDepense;
 async function saveDepenses(){await saveDepense();}
 window.saveDepenses=saveDepenses;
 
-function openAddAvanceNour(mois){
-const html=`<div class="overlay" id="modal-avance-nour" style="display:flex">
-<div class="sheet">
-<div class="sheet-handle"></div>
-<div class="sheet-header"><span class="sheet-title">👩 Avance Nour</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-avance-nour');document.getElementById('modal-avance-nour').remove()">✕</button></div>
-<div class="sheet-body">
-<div class="field"><label>Date</label><input type="date" id="avance-date" value="${mois+'-'+new Date().getDate().toString().padStart(2,'0')}"/></div>
-<div class="field"><label>Montant (F CFA)</label><input type="number" id="avance-montant" placeholder="ex: 5000" min="0"/></div>
-<div class="field"><label>Note (optionnel)</label><input type="text" id="avance-note" placeholder="ex: Avance semaine 1"/></div>
-</div>
-<div class="sheet-footer">
-<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-avance-nour');document.getElementById('modal-avance-nour').remove()">Annuler</button>
-<button class="btn btn-red" style="flex:2" onclick="saveAvanceNour()">💾 Enregistrer</button>
-</div>
-</div>
-</div>`;
-document.body.insertAdjacentHTML("beforeend",html);
-setTimeout(()=>document.getElementById("avance-montant")?.focus(),300);
-}
-window.openAddAvanceNour=openAddAvanceNour;
-
-async function saveAvanceNour(){
-const date=document.getElementById("avance-date").value;
-const montant=+document.getElementById("avance-montant").value;
-const note=document.getElementById("avance-note").value.trim();
-if(!date||!montant)return alert("Date et montant obligatoires !");
-const k=push(ref(db,"depenses")).key;
-const mois=date.slice(0,7);
-await set(ref(db,"depenses/"+k),{_key:k,date,mois,cat:"Avance Nour",montant,note:note||""});
-closeModal("modal-avance-nour");
-document.getElementById("modal-avance-nour")?.remove();
-render();
-}
-window.saveAvanceNour=saveAvanceNour;
-
 function addEditDepenseLigne(){
 const c=document.getElementById("med-lignes");
 const div=document.createElement("div");
@@ -1767,17 +1732,16 @@ const ms=monthStats(mk);
 const [y,m]=mk.split("-");
 const label=`${MONTHS_FULL[+m-1]} ${y}`;
 const totalRetraitsMois=getTotalRetraitsAllMois(mk);
-const benefNet=ms.profit-(dep?.total||0);
-const benefApresRetraits=benefNet-totalRetraitsMois;
+const benefNet=ms.profit-(dep?.total||0)-totalRetraitsMois;
 const isCurrent=mk===nowMK();
 const hasRetraits=getRetraits().some(r=>r.mois===mk);
 if(!isCurrent&&!dep&&ms.profit===0&&!hasRetraits)return"";
 
 // Retraits section per associé
 const retraitsSection=ASSOCIES.map(assoc=>{
-const retraitsList=getRetraitsMois(mk,assoc);
+const retraitsList=getRetraitsMois(mk,assoc).filter(r=>!r.solde);
 const totalAssoc=retraitsList.reduce((a,r)=>a+(+r.montant||0),0);
-const soldedList=getRetraits().filter(r=>r.assoc===assoc&&r.solde);
+const soldedList=getRetraitsMois(mk,assoc).filter(r=>r.solde);
 const totalSolde=soldedList.reduce((a,r)=>a+(+r.montant||0),0);
 return`<div style="background:var(--bg);border-radius:10px;padding:10px 12px;margin-bottom:8px">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -1810,30 +1774,11 @@ return`<div class="depense-card"><div style="display:flex;justify-content:space-
 ${depList.length>0?`${depList.sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(d=>`<div class="depense-row" style="align-items:center"><div style="flex:1"><span class="depense-cat">${d.cat}</span>${d.note?`<div style="font-size:10px;color:var(--muted)">${d.note}</div>`:""}<div style="font-size:10px;color:var(--muted)">${d.date||d.mois}</div></div><div style="display:flex;align-items:center;gap:6px"><span class="depense-montant">-${cfa(d.montant)}</span><button onclick="openEditDepenses('${d._key}')" style="background:#3b82f622;border:1px solid #3b82f644;color:var(--blue);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✎</button><button onclick="deleteDepense('${d._key}')" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button></div></div>`).join("")}
 <div class="bilan-total" style="padding-top:8px;padding-bottom:8px;border-bottom:1px solid var(--border)"><span class="bilan-total-label" style="font-size:12px">Total dépenses</span><span style="font-family:monospace;font-weight:800;font-size:14px;color:var(--red)">-${cfa(dep.total)}</span></div>`:`<div style="color:var(--muted);font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)">Aucune dépense ce mois</div>`}
 <div style="margin-top:10px">${retraitsSection}</div>
-<div style="background:var(--bg);border-radius:10px;padding:10px 12px;margin-top:8px;margin-bottom:8px">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-<span style="font-weight:800;font-size:12px">👩 Avances Nour</span>
-<div style="display:flex;gap:6px;align-items:center">
-<span style="font-family:monospace;font-weight:800;font-size:13px;color:var(--red)">${cfa(depList.filter(d=>d.cat==="Avance Nour").reduce((a,d)=>a+(+d.montant||0),0))}</span>
-<button class="btn btn-red btn-sm" style="padding:3px 8px;font-size:10px" onclick="openAddAvanceNour('${mk}')">+</button>
-</div>
-</div>
-${depList.filter(d=>d.cat==="Avance Nour").length===0?`<div style="font-size:11px;color:var(--muted)">Aucune avance ce mois</div>`:""}
-${depList.filter(d=>d.cat==="Avance Nour").sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(d=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">
-<div><span style="color:var(--muted)">${d.date}</span>${d.note?` · <span style="color:var(--muted)">${d.note}</span>`:""}</div>
-<div style="display:flex;align-items:center;gap:6px">
-<span style="font-family:monospace;color:var(--red)">-${cfa(d.montant)}</span>
-<button onclick="openEditDepenses('${d._key}')" style="background:#3b82f622;border:1px solid #3b82f644;color:var(--blue);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✎</button>
-<button onclick="deleteDepense('${d._key}')" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button>
-</div>
-</div>`).join("")}
-</div>
 <div style="background:var(--bg);border-radius:9px;padding:10px 12px;margin-top:8px">
-<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;color:var(--muted)">Bénéfice brut</span><span style="font-family:monospace;font-size:12px;color:var(--green)">+${cfa(Math.round(ms.profit))}</span></div>
+<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;color:var(--muted)">Bénéfice net</span><span style="font-family:monospace;font-size:12px;color:var(--green)">+${cfa(Math.round(ms.profit))}</span></div>
 ${dep?`<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;color:var(--muted)">Dépenses</span><span style="font-family:monospace;font-size:12px;color:var(--red)">-${cfa(dep.total)}</span></div>`:""}
-<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border)"><span style="font-size:12px;font-weight:800">Bénéf. net réel</span><span style="font-family:monospace;font-weight:800;font-size:15px;color:${benefNet>=0?"var(--green)":"var(--red)"}">${benefNet>=0?"+":""}${cfa(Math.round(benefNet))}</span></div>
-${totalRetraitsMois>0?`<div style="display:flex;justify-content:space-between;margin-top:4px;margin-bottom:4px"><span style="font-size:11px;color:var(--muted)">Retraits associés</span><span style="font-family:monospace;font-size:12px;color:var(--amber)">-${cfa(totalRetraitsMois)}</span></div>
-<div style="display:flex;justify-content:space-between;padding-top:6px;border-top:1px solid var(--border)"><span style="font-size:12px;font-weight:800">Après retraits</span><span style="font-family:monospace;font-weight:800;font-size:15px;color:${benefApresRetraits>=0?"var(--green)":"var(--red)"}">${benefApresRetraits>=0?"+":""}${cfa(Math.round(benefApresRetraits))}</span></div>`:""}
+${totalRetraitsMois>0?`<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;color:var(--muted)">Retraits associés</span><span style="font-family:monospace;font-size:12px;color:var(--amber)">-${cfa(totalRetraitsMois)}</span></div>`:""}
+<div style="display:flex;justify-content:space-between;padding-top:6px;border-top:1px solid var(--border)"><span style="font-size:12px;font-weight:800">Bénéfice net réel</span><span style="font-family:monospace;font-weight:800;font-size:15px;color:${benefNet>=0?"var(--green)":"var(--red)"}">${benefNet>=0?"+":""}${cfa(Math.round(benefNet))}</span></div>
 </div>
 </div>`;
 }).join("");
@@ -1875,7 +1820,7 @@ const getRetraits=()=>toArr(fbRetraits);
 const ASSOCIES=["Hadi","Youssef"];
 
 function getRetraitsMois(mk,assoc){
-return getRetraits().filter(r=>r.assoc===assoc&&!r.solde);
+return getRetraits().filter(r=>r.mois===mk&&r.assoc===assoc);
 }
 function getTotalRetraitsMois(mk,assoc){
 return getRetraitsMois(mk,assoc).reduce((a,r)=>a+(+r.montant||0),0);
@@ -1920,13 +1865,13 @@ render();
 window.deleteRetrait=deleteRetrait;
 
 async function solderRetraits(mk,assoc){
+if(!confirm("Solder les retraits de "+assoc+" pour ce mois ?\nLes retraits restent dans l'historique, le compteur repart à 0."))return;
+// Mark as soldé (don't delete, just archive)
 const retraits=getRetraitsMois(mk,assoc);
-const total=retraits.reduce((a,r)=>a+(+r.montant||0),0);
-if(!confirm("Solder les retraits de "+assoc+" ?\nTotal: "+cfa(total)+"\nLe compteur repart à 0."))return;
 for(const r of retraits){
   await set(ref(db,"retraits/"+r._key),{...r,solde:true});
 }
-alert("✅ Retraits de "+assoc+" soldés — "+cfa(total));
+alert("✅ Retraits de "+assoc+" soldés pour "+mk);
 render();
 }
 window.solderRetraits=solderRetraits;
@@ -2189,7 +2134,7 @@ ${tag(isEnAttente?"🚚 En attente":"✅ Reçue",isEnAttente?"amber":"green")}
 </div>
 <div style="margin-bottom:10px">
 ${lignes.map(l=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
-<span style="font-weight:600">${l.produit||l.produitNom||"Produit sans nom"} × ${l.qty}</span>
+<span style="font-weight:600">${l.produit} × ${l.qty}</span>
 <span style="font-family:monospace">${cfa(l.prixRevient*l.qty)}</span>
 </div>`).join("")}
 <div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:800">
@@ -2293,14 +2238,12 @@ for(const el of lignesEls){
   if(!qty||!prix)continue;
   let produitId=select.value;
   let produitNom="";
-  if(produitId==="__nouveau__"||produitId===""){
-    const nomSaisi=nomEl?.value.trim();
-    if(!nomSaisi){alert("⚠️ Saisis le nom du nouveau produit avant de valider !");return;}
-    produitNom=nomSaisi;
+  if(produitId==="__nouveau__"){
+    produitNom=nomEl?.value.trim()||"Nouveau produit";
     produitId=null;
   }else{
     const p=getP(produitId);
-    produitNom=p?p.name:(select.options[select.selectedIndex]?.dataset?.nom||select.options[select.selectedIndex]?.text||"?");
+    produitNom=p?p.name:select.options[select.selectedIndex]?.text||"?";
   }
   lignes.push({produitId:produitId||null,produit:produitNom,qty,prixRevient:prix});
   total+=qty*prix;
@@ -2419,7 +2362,7 @@ let lignesHTML=lignes.map((l,i)=>`<div id="edit-ligne-${i}" style="background:va
 <button onclick="document.getElementById('edit-ligne-${i}').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px">✕</button>
 </div>
 <div class="field" style="margin-bottom:8px"><select class="cmd-produit-select" onchange="onCmdProduitChange(this,'edit-ligne-${i}')">${prodOptions(l.produitId)}</select></div>
-<div id="edit-ligne-${i}-nom-field" style="display:${!l.produitId?"block":"none"}" class="field" style="margin-bottom:8px"><label>Nom du produit</label><input type="text" class="cmd-nouveau-nom" value="${l.produit||""}"/></div>
+<div id="edit-ligne-${i}-nom-field" style="display:none" class="field" style="margin-bottom:8px"><label>Nom</label><input type="text" class="cmd-nouveau-nom" value="${l.produit||""}"/></div>
 <div class="grid2" style="gap:8px">
 <div class="field"><label>Quantité</label><input type="number" class="cmd-qty" min="1" value="${l.qty||1}"/></div>
 <div class="field"><label>Prix/u (F)</label><input type="number" class="cmd-prix" min="0" value="${l.prixRevient||0}"/></div>
@@ -2466,14 +2409,12 @@ for(const el of lignesEls){
   if(!qty||!prix)continue;
   let produitId=select.value;
   let produitNom="";
-  if(produitId==="__nouveau__"||produitId===""){
-    const nomSaisi=nomEl?.value.trim();
-    if(!nomSaisi){alert("⚠️ Saisis le nom du nouveau produit avant de valider !");return;}
-    produitNom=nomSaisi;
+  if(produitId==="__nouveau__"){
+    produitNom=nomEl?.value.trim()||"Nouveau produit";
     produitId=null;
   }else{
     const p=getP(produitId);
-    produitNom=p?p.name:(select.options[select.selectedIndex]?.dataset?.nom||select.options[select.selectedIndex]?.text||"?");
+    produitNom=p?p.name:select.options[select.selectedIndex]?.text||"?";
   }
   lignes.push({produitId:produitId||null,produit:produitNom,qty,prixRevient:prix});
   total+=qty*prix;
@@ -2626,13 +2567,24 @@ const html=`<div class="overlay" id="modal-reset" style="display:flex">
 <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6">Supprime les anciennes ventes de dépôts-vente dans /sales qui causent un double comptage.</div>
 <button class="btn btn-primary btn-full" onclick="cleanDepotSales()">🧹 Nettoyer maintenant</button>
 </div>
+<div style="background:#ef444414;border:1px solid #ef444433;border-radius:12px;padding:14px;margin-bottom:4px">
+<div style="font-weight:800;font-size:14px;color:var(--red);margin-bottom:6px">🗑️ Réinitialiser l'application</div>
+<div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.6">Efface <b>toutes les données</b> : produits, ventes, rapports, dépôts, crédits, commandes, caisse.<br>⚠️ Action irréversible.</div>
+<div class="field">
+<label>Confirme avec ton mot de passe Admin</label>
+<input type="password" id="reset-pw" placeholder="••••••••••" style="letter-spacing:3px"/>
+</div>
+<div style="color:var(--red);font-size:11px;font-weight:700;min-height:16px;margin-top:4px" id="reset-err"></div>
+</div>
 </div>
 <div class="sheet-footer">
-<button class="btn btn-ghost btn-full" onclick="closeModal('modal-reset');document.getElementById('modal-reset').remove()">Fermer</button>
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-reset');document.getElementById('modal-reset').remove()">Annuler</button>
+<button class="btn btn-red" style="flex:2" onclick="confirmReset()">🗑️ Réinitialiser</button>
 </div>
 </div>
 </div>`;
 document.body.insertAdjacentHTML("beforeend",html);
+setTimeout(()=>document.getElementById("reset-pw")?.focus(),300);
 }
 window.openResetMenu=openResetMenu;
 
@@ -2797,12 +2749,7 @@ const html=`<div class="overlay" id="modal-remb" style="display:flex">
 <span style="font-size:12px;color:var(--muted)">Reste dû</span>
 <span style="font-family:monospace;font-weight:800;color:var(--red)">${cfa(+c.montantRestant||0)}</span>
 </div>
-<div class="field"><label>Montant remboursé (F CFA)</label>
-<div style="display:flex;gap:8px;align-items:center">
-<input type="number" id="remb-montant" placeholder="ex: 5000" max="${c.montantRestant}" style="flex:1"/>
-<button class="btn btn-amber btn-sm" style="white-space:nowrap" onclick="document.getElementById('remb-montant').value=${+c.montantRestant||0}">Tout (${cfa(+c.montantRestant||0)})</button>
-</div>
-</div>
+<div class="field"><label>Montant remboursé (F CFA)</label><input type="number" id="remb-montant" placeholder="ex: 5000" max="${c.montantRestant}"/></div>
 <div class="field"><label>Date</label><input type="date" id="remb-date" value="${today()}"/></div>
 </div>
 <div class="sheet-footer">
@@ -3016,9 +2963,8 @@ document.body.insertAdjacentHTML("beforeend",html);
 }
 window.showCapitalMobilise=showCapitalMobilise;
 
-function showBenefDetail(benefBrut,depenses,retraitsHadi,retraitsYoussef,benefApresRetraits){
+function showBenefDetail(benefBrut,depenses,retraitsHadi,retraitsYoussef,benefNet){
 const totalRetraits=retraitsHadi+retraitsYoussef;
-const benefNet=benefBrut-depenses;
 const html=`<div class="overlay" id="modal-benef-detail" style="display:flex">
 <div class="sheet">
 <div class="sheet-handle"></div>
@@ -3029,7 +2975,7 @@ const html=`<div class="overlay" id="modal-benef-detail" style="display:flex">
 <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">💰 Calcul du mois</div>
 
 <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
-<span style="font-size:13px;color:var(--text)">Bénéfice brut ventes</span>
+<span style="font-size:13px;color:var(--text)">Bénéfice net ventes</span>
 <span style="font-family:monospace;font-weight:700;color:var(--green)">+${cfa(Math.round(benefBrut))}</span>
 </div>
 
@@ -3038,27 +2984,21 @@ ${depenses>0?`<div style="display:flex;justify-content:space-between;align-items
 <span style="font-family:monospace;font-weight:700;color:var(--red)">-${cfa(depenses)}</span>
 </div>`:""}
 
-<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-top:2px solid var(--border);margin-top:4px">
-<span style="font-size:14px;font-weight:800">= Bénéf. net réel</span>
-<span style="font-family:monospace;font-weight:800;font-size:18px;color:${benefNet>=0?"var(--green)":"var(--red)"}">${benefNet>=0?"+":""}${cfa(Math.round(benefNet))}</span>
-</div>
-</div>
-
-${totalRetraits>0?`<div style="background:var(--bg);border-radius:12px;padding:14px;margin-bottom:12px">
-<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">💸 Retraits associés</div>
 ${retraitsHadi>0?`<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
 <span style="font-size:13px;color:var(--text)">Retrait Hadi</span>
 <span style="font-family:monospace;font-weight:700;color:var(--amber)">-${cfa(retraitsHadi)}</span>
 </div>`:""}
+
 ${retraitsYoussef>0?`<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
 <span style="font-size:13px;color:var(--text)">Retrait Youssef</span>
 <span style="font-family:monospace;font-weight:700;color:var(--amber)">-${cfa(retraitsYoussef)}</span>
 </div>`:""}
+
 <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0 4px;border-top:2px solid var(--border);margin-top:4px">
-<span style="font-size:14px;font-weight:800">= Bénéf. après retraits</span>
-<span style="font-family:monospace;font-weight:800;font-size:18px;color:${benefApresRetraits>=0?"var(--green)":"var(--red)"}">${benefApresRetraits>=0?"+":""}${cfa(Math.round(benefApresRetraits))}</span>
+<span style="font-size:14px;font-weight:800">= Bénéfice net réel</span>
+<span style="font-family:monospace;font-weight:800;font-size:18px;color:${benefNet>=0?"var(--green)":"var(--red)"}">${benefNet>=0?"+":""}${cfa(Math.round(benefNet))}</span>
 </div>
-</div>`:""}
+</div>
 
 ${depenses===0?`<div style="background:#f59e0b14;border:1px solid #f59e0b33;border-radius:10px;padding:11px 13px;font-size:12px;color:var(--amber)">⚠️ Aucune dépense enregistrée ce mois. Pense à les ajouter dans l'onglet Dépenses.</div>`:""}
 
@@ -3137,11 +3077,10 @@ const depMoisDash=depListDash.length>0?{total:depListDash.reduce((a,d)=>a+(+d.mo
 const retraitsMoisDash=getTotalRetraitsAllMois(mk);
 const retraitsHadiDash=getTotalRetraitsMois(mk,"Hadi");
 const retraitsYoussefDash=getTotalRetraitsMois(mk,"Youssef");
-const beneficeReelDash=m.profit-(depMoisDash?.total||0);
-const beneficeApresRetraitsDash=beneficeReelDash-retraitsMoisDash;
+const beneficeReelDash=m.profit-(depMoisDash?.total||0)-retraitsMoisDash;
 const cd=Array.from({length:6},(_,i)=>{const dd=new Date(d.getFullYear(),d.getMonth()-5+i,1);const k=`${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,"0")}`;return{lbl:MONTHS[dd.getMonth()],v:monthStats(k).profit};});
 const bmax=Math.max(...cd.map(x=>x.v),1);
-el.innerHTML=`${monthCardHtml(mk,currentLabel,true)}<div class="grid2" style="margin-bottom:12px"><div class="stat-box" onclick="showBenefDetail(${m.profit},${depMoisDash?.total||0},${retraitsHadiDash},${retraitsYoussefDash},${beneficeApresRetraitsDash})" style="cursor:pointer;border-color:#22c55e44"><div class="stat-label">Bénéf. net réel (mois) 👆</div><div class="stat-val" style="color:${beneficeReelDash>=0?"var(--green)":"var(--red)"};font-size:14px">${beneficeReelDash>=0?"+":""}${cfa(Math.round(beneficeReelDash))}</div><div class="stat-sub">${depMoisDash?"Dép: -"+cfa(depMoisDash.total):"⚠️ sans dépenses"}</div>${retraitsMoisDash>0?`<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Après retraits (-${cfa(retraitsMoisDash)})</div><div style="font-family:monospace;font-weight:800;font-size:13px;color:${beneficeApresRetraitsDash>=0?"var(--green)":"var(--red)"}">${beneficeApresRetraitsDash>=0?"+":""}${cfa(Math.round(beneficeApresRetraitsDash))}</div></div>`:""}</div><div class="stat-box"><div class="stat-label">CA ce mois</div><div class="stat-val" style="color:var(--blue);font-size:14px">${cfa(m.ca)}</div></div><div class="stat-box" onclick="showCapitalMobilise(${capitalStock},${caisseActuelle},${capitalDepots},${capitalCredits},${capitalCommandes},${capitalMobilise})" style="cursor:pointer;border-color:#a78bfa44"><div class="stat-label">💼 Capital mobilisé 👆</div><div class="stat-val" style="color:var(--violet);font-size:13px">${cfa(Math.round(capitalMobilise))}</div><div class="stat-sub">Stock+Caisse+Dépôts+Crédits+Cdes</div></div>
+el.innerHTML=`${monthCardHtml(mk,currentLabel,true)}<div class="grid2" style="margin-bottom:12px"><div class="stat-box" onclick="showBenefDetail(${m.profit},${depMoisDash?.total||0},${retraitsHadiDash},${retraitsYoussefDash},${beneficeReelDash})" style="cursor:pointer;border-color:#22c55e44"><div class="stat-label">Bénéf. net réel (mois) 👆</div><div class="stat-val" style="color:${beneficeReelDash>=0?"var(--green)":"var(--red)"};font-size:14px">${beneficeReelDash>=0?"+":""}${cfa(Math.round(beneficeReelDash))}</div><div class="stat-sub">${depMoisDash?"Dép: -"+cfa(depMoisDash.total)+" | ":"⚠️ "}${retraitsMoisDash>0?"Retraits: -"+cfa(retraitsMoisDash):""}</div></div><div class="stat-box"><div class="stat-label">CA ce mois</div><div class="stat-val" style="color:var(--blue);font-size:14px">${cfa(m.ca)}</div></div><div class="stat-box" onclick="showCapitalMobilise(${capitalStock},${caisseActuelle},${capitalDepots},${capitalCredits},${capitalCommandes},${capitalMobilise})" style="cursor:pointer;border-color:#a78bfa44"><div class="stat-label">💼 Capital mobilisé 👆</div><div class="stat-val" style="color:var(--violet);font-size:13px">${cfa(Math.round(capitalMobilise))}</div><div class="stat-sub">Stock+Caisse+Dépôts+Crédits+Cdes</div></div>
 ${capitalEngage>0?`<div class="stat-box" style="border-color:#f59e0b44"><div class="stat-label">💸 Engagé commandes</div><div class="stat-val" style="color:var(--amber);font-size:13px">${cfa(capitalEngage)}</div><div class="stat-sub">${getCommandes().filter(c=>c.status==="en_attente").length} commande(s) en attente</div></div>`:""}<div class="stat-box"><div class="stat-label">Bénéf. brut total</div><div class="stat-val" style="color:var(--green);font-size:13px">${cfa(totalB)}</div></div></div><div class="card"><div style="font-weight:800;font-size:13px;margin-bottom:12px">📈 Bénéfices 6 mois</div><div class="bar-chart">${cd.map((x,i)=>{const h=x.v?Math.round((x.v/bmax)*60):2;return`<div class="bar-col"><div class="bar" style="height:${h}px;background:hsl(${210-i*8},60%,${38+(x.v/bmax)*22}%)"></div><span class="bar-lbl">${x.lbl}</span></div>`;}).join("")}</div></div>${retraitsMoisDash>0?`<div class="card" style="margin-bottom:12px"><div style="font-weight:800;font-size:13px;margin-bottom:10px">💰 Retraits du mois</div>
 <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><span style="font-size:13px">Hadi</span><span style="font-family:monospace;color:var(--amber);font-weight:700">-${cfa(retraitsHadiDash)}</span></div>
 <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><span style="font-size:13px">Youssef</span><span style="font-family:monospace;color:var(--amber);font-weight:700">-${cfa(retraitsYoussefDash)}</span></div>
