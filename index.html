@@ -1250,23 +1250,17 @@ await fbRemoveMovesByDateOut(r.date);
 const ventesF=editVentes.map(v=>{const p=getP(v.productId);const isGift=v.price===0;return{...v,productName:p?p.name:v.productName,costPrice:p?p.costPrice:v.costPrice,profit:isGift?-(p?p.costPrice:v.costPrice)*v.qty:(v.price-(p?p.costPrice:v.costPrice))*v.qty,isGift};});
 for(const v of ventesF){const p=getP(v.productId);if(p){await fbSetProduct({...p,stock:p.stock-v.qty});await fbAddMove({productId:p.id,productName:p.name,type:"out",qty:v.qty,date:r.date,note:"Vente modifiée"});}}
 for(const v of ventesF.filter(v=>!v.isGift)){await fbAddSale({productId:+v.productId,productName:v.productName,qty:v.qty,salePrice:v.price,costPrice:v.costPrice,type:v.type,date:r.date,profit:v.profit,isCredit:!!v.isCredit});}
-
-// Crédits : seulement les ventes qui N'ÉTAIENT PAS déjà à crédit avant
-const ventesAvant=(r.ventes||[]).filter(v=>v.isCredit&&!v.isGift);
-const ventesApres=ventesF.filter(v=>v.isCredit&&!v.isGift);
-// Nouvelles ventes à crédit = celles qui n'avaient pas isCredit=true avant (comparaison par id)
-const ventesAvantIds=new Set(ventesAvant.map(v=>v.id));
-const nouvellesVentesCredit=ventesApres.filter(v=>!ventesAvantIds.has(v.id));
-for(const vc of nouvellesVentesCredit){
+const ventesCredit=ventesF.filter(v=>v.isCredit&&!v.isGift);
+for(const vc of ventesCredit){
   const montant=(vc.price||0)*(vc.qty||0);if(!montant)continue;
   if(vc.creditKey&&vc.creditKey!=="__nouveau__"){
     const c=getCredits().find(c=>c._key===vc.creditKey);
-    if(c)await set(ref(db,"credits/"+c._key),{...c,montantInitial:(+c.montantInitial||0)+montant,montantRestant:(+c.montantRestant||0)+montant,historique:[...(c.historique||[]),{date:r.date,montant,note:"Ajout crédit rapport"}],status:"en cours"});
+    if(c)await set(ref(db,"credits/"+c._key),{...c,montantInitial:(+c.montantInitial||0)+montant,montantRestant:(+c.montantRestant||0)+montant,historique:[...(c.historique||[]),{date:r.date,montant,note:"Rapport modifié"}],status:"en cours"});
   }else{
     const nom=(vc.clientCredit||"").trim();
     const doublon=nom?getCredits().find(c=>c.client&&c.client.trim().toLowerCase()===nom.toLowerCase()):null;
-    if(doublon)await set(ref(db,"credits/"+doublon._key),{...doublon,montantInitial:(+doublon.montantInitial||0)+montant,montantRestant:(+doublon.montantRestant||0)+montant,historique:[...(doublon.historique||[]),{date:r.date,montant,note:"Ajout crédit rapport"}],status:"en cours"});
-    else if(nom){const k=push(ref(db,"credits")).key;await set(ref(db,"credits/"+k),{_key:k,client:nom,montantInitial:montant,montantRestant:montant,date:r.date,note:"",status:"en cours",remboursements:[],historique:[{date:r.date,montant,note:"Rapport modifié"}],fromRapport:true});}
+    if(doublon)await set(ref(db,"credits/"+doublon._key),{...doublon,montantInitial:(+doublon.montantInitial||0)+montant,montantRestant:(+doublon.montantRestant||0)+montant,historique:[...(doublon.historique||[]),{date:r.date,montant,note:"Rapport modifié"}],status:"en cours"});
+    else if(nom){const k=push(ref(db,"credits")).key;await set(ref(db,"credits/"+k),{_key:k,client:nom,montantInitial:montant,montantRestant:montant,date:r.date,note:"",status:"en cours",remboursements:[],historique:[{date:r.date,montant,note:"Depuis rapport modifié"}],fromRapport:true});}
   }
 }
 await fbUpdateRapport(editingRapportId,{...r,ventes:ventesF,totals:calcTotals(ventesF)});
@@ -2079,16 +2073,6 @@ Object.values(allDays).forEach(day=>{
 const soldeActuel=soldeDepart+totalEntrees-totalSorties;
 window._soldeCaisseActuel=soldeActuel;
 
-// Solde de fin de journée cumulé
-const sortedAsc=[...sortedDates].sort((a,b)=>a.localeCompare(b));
-const soldeFin={};
-let soldeCumul=soldeDepart;
-sortedAsc.forEach(date=>{
-  const day=allDays[date];
-  soldeCumul+=day.entrees.reduce((a,e)=>a+e.montant,0)-day.sorties.reduce((a,s)=>a+s.montant,0);
-  soldeFin[date]=soldeCumul;
-});
-
 el.innerHTML=`
 <div class="sec-head"><span class="sec-title">🏦 Caisse</span>
 <div style="display:flex;gap:6px">
@@ -2141,10 +2125,6 @@ ${(day.notes||[]).map(n=>`<div style="display:flex;justify-content:space-between
 <span style="color:var(--muted);font-style:italic">${n.label}</span>
 <span style="font-family:monospace;color:var(--muted)">ℹ️ ${cfa(n.montant)}</span>
 </div>`).join("")}
-<div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;margin-top:4px;border-top:2px solid var(--border)">
-<span style="font-size:11px;font-weight:700;color:var(--muted)">💰 Solde fin de journée</span>
-<span style="font-family:monospace;font-weight:800;font-size:13px;color:${soldeFin[date]>=0?"var(--green)":"var(--red)"}">${cfa(Math.round(soldeFin[date]))}</span>
-</div>
 </div>`;
 }).join("")}`;
 }
@@ -2771,9 +2751,12 @@ ${!solde?`<div style="display:flex;gap:6px">
 </div>`:`<div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" style="flex:1" onclick="editCredit('${c._key}')">✎ Modifier</button><button class="btn btn-ghost btn-sm btn-full" style="flex:1" onclick="deleteCredit('${c._key}')">✕ Supprimer</button></div>`}
 ${((c.historique||[]).length||(c.remboursements||[]).length)?`<div style="margin-top:10px">
 <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">📋 Historique</div>
-${(c.historique||[]).map(h=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
+${(c.historique||[]).map((h,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
 <div><span style="color:var(--muted)">${h.date}</span><div style="font-size:10px;color:var(--muted)">${h.note||""}</div></div>
+<div style="display:flex;align-items:center;gap:6px">
 <span style="font-family:monospace;color:var(--red)">+${cfa(h.montant)}</span>
+<button onclick="deleteHistoriqueCredit('${c._key}',${i})" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button>
+</div>
 </div>`).join("")}
 ${(c.remboursements||[]).map((r,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
 <span style="color:var(--muted)">${r.date} · Remb.</span>
@@ -2973,6 +2956,20 @@ alert("✅ Remboursement supprimé !");
 render();
 }
 window.deleteRemboursement=deleteRemboursement;
+
+async function deleteHistoriqueCredit(creditKey,index){
+const c=getCredits().find(c=>c._key===creditKey);if(!c)return;
+const h=c.historique||[];
+const ligne=h[index];
+if(!ligne)return;
+if(!confirm("Supprimer cette ligne d'historique ?\n"+ligne.date+" · "+cfa(ligne.montant)+"\n⚠️ Le montant initial sera aussi ajusté."))return;
+const newHistorique=h.filter((_,i)=>i!==index);
+const newMontantInitial=Math.max(0,(+c.montantInitial||0)-(+ligne.montant||0));
+const newMontantRestant=Math.max(0,(+c.montantRestant||0)-(+ligne.montant||0));
+await set(ref(db,"credits/"+creditKey),{...c,historique:newHistorique,montantInitial:newMontantInitial,montantRestant:newMontantRestant});
+render();
+}
+window.deleteHistoriqueCredit=deleteHistoriqueCredit;
 
 function editRetrait(key){
 const r=getRetraits().find(x=>x._key===key);if(!r)return;
