@@ -248,7 +248,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Syne',
 <div style="font-size:14px;font-weight:700;text-align:center" id="scan-status">🤖 L'IA analyse votre cahier...</div>
 <div style="font-size:11px;color:var(--muted);text-align:center">Détection des ventes en cours</div>
 </div>
-<input type="file" id="photo-input" accept="image/*" capture="environment" style="display:none" onchange="handlePhoto(event)"/>
+<input type="file" id="photo-input" accept="image/*" style="display:none" onchange="handlePhoto(event)"/>
 <!-- MODAL STOCK IN -->
 <div class="overlay" id="modal-stock-in" style="display:none">
 <div class="sheet">
@@ -1006,7 +1006,27 @@ alert("✅ Journée sans vente enregistrée.");render();
 }
 window.validerJourneeVide=validerJourneeVide;
 
-function triggerPhoto(){document.getElementById("photo-input").click();}
+function triggerPhoto(){
+const existing=document.getElementById("modal-photo-choice");
+if(existing)existing.remove();
+const html=`<div class="overlay" id="modal-photo-choice" style="display:flex" onclick="if(event.target===this){this.remove()}">
+<div class="sheet" style="padding-bottom:env(safe-area-inset-bottom)">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">📷 Scanner le cahier</span><button class="btn btn-ghost btn-sm" onclick="document.getElementById('modal-photo-choice').remove()">✕</button></div>
+<div class="sheet-body" style="display:flex;flex-direction:column;gap:12px;padding-bottom:16px">
+<button class="btn btn-full" style="background:#0ea5e914;border:1px solid #0ea5e944;color:#38bdf8;font-size:15px;padding:18px;border-radius:14px;display:flex;align-items:center;gap:12px" onclick="document.getElementById('modal-photo-choice').remove();document.getElementById('photo-input').click()">
+<span style="font-size:28px">📷</span>
+<div style="text-align:left"><div style="font-weight:800">Prendre une photo</div><div style="font-size:11px;opacity:.7;margin-top:2px">Ouvrir la caméra maintenant</div></div>
+</button>
+<button class="btn btn-full" style="background:#8b5cf614;border:1px solid #8b5cf644;color:#a78bfa;font-size:15px;padding:18px;border-radius:14px;display:flex;align-items:center;gap:12px" onclick="document.getElementById('modal-photo-choice').remove();document.getElementById('photo-input').click()">
+<span style="font-size:28px">🖼️</span>
+<div style="text-align:left"><div style="font-weight:800">Choisir depuis la galerie</div><div style="font-size:11px;opacity:.7;margin-top:2px">Sélectionner une photo existante</div></div>
+</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
 window.triggerPhoto=triggerPhoto;
 
 async function handlePhoto(event){
@@ -1750,12 +1770,12 @@ const totalRetraitsMois=getTotalRetraitsAllMois(mk);
 const benefNet=ms.profit-(dep?.total||0);
 const benefApresRetraits=benefNet-totalRetraitsMois;
 const isCurrent=mk===nowMK();
-const hasRetraits=getRetraits().some(r=>r.mois===mk)||ASSOCIES.some(a=>getRetraitsMois(mk,a).length>0);
+const hasRetraits=getRetraits().some(r=>r.mois===mk);
 if(!isCurrent&&!dep&&ms.profit===0&&!hasRetraits)return"";
 
 // Retraits section per associé
 const retraitsSection=ASSOCIES.map(assoc=>{
-const retraitsList=getRetraitsMois(mk,assoc); // déjà filtrés non-soldés
+const retraitsList=getRetraitsMois(mk,assoc);
 const totalAssoc=retraitsList.reduce((a,r)=>a+(+r.montant||0),0);
 const soldedList=getRetraits().filter(r=>r.assoc===assoc&&r.solde);
 const totalSolde=soldedList.reduce((a,r)=>a+(+r.montant||0),0);
@@ -1855,7 +1875,6 @@ const getRetraits=()=>toArr(fbRetraits);
 const ASSOCIES=["Hadi","Youssef"];
 
 function getRetraitsMois(mk,assoc){
-// Retourne TOUS les retraits non soldés de l'associé (accumulation jusqu'au solder)
 return getRetraits().filter(r=>r.assoc===assoc&&!r.solde);
 }
 function getTotalRetraitsMois(mk,assoc){
