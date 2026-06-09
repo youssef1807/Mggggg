@@ -1429,19 +1429,42 @@ el.innerHTML=`<div style="font-weight:800;font-size:12px;margin-bottom:10px">↩
 <button class="btn btn-amber btn-full" onclick="saveRetourDepot('${key}')">↩ Récupérer le stock</button>`;
 }
 if(type==="corriger"){
-el.innerHTML=`<div style="font-weight:800;font-size:12px;margin-bottom:10px">✎ Corriger le total déposé</div>
-<div style="background:#f59e0b14;border:1px solid #f59e0b33;border-radius:9px;padding:10px 12px;margin-bottom:12px;font-size:11px;color:var(--amber)">⚠️ Utilise ça uniquement pour corriger une erreur de comptage. Valeur actuelle : <b>${d.qtyDeposited}</b> unités.</div>
-<div class="field" style="margin-bottom:8px"><label>Nouveau total déposé</label><input type="number" id="corriger-qty" value="${d.qtyDeposited}" min="0"/></div>
+const prixU=+d.prixEstime||0;
+const totalVerse=(d.versements||[]).reduce((a,v)=>a+(+v.montant||0),0);
+const resteActuel=Math.max(0,(+d.qtyDeposited||0)*prixU-totalVerse);
+el.innerHTML=`<div style="font-weight:800;font-size:12px;margin-bottom:10px">✎ Corriger le reste à percevoir</div>
+<div style="background:var(--bg);border-radius:9px;padding:10px 12px;margin-bottom:10px;font-size:12px">
+<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:var(--muted)">Déjà versé</span><span style="font-family:monospace;color:var(--green)">${cfa(totalVerse)}</span></div>
+<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:var(--muted)">Prix/unité</span><span style="font-family:monospace">${cfa(prixU)}</span></div>
+<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Reste actuel</span><span style="font-family:monospace;color:var(--red)">${cfa(resteActuel)}</span></div>
+</div>
+<div class="field" style="margin-bottom:8px"><label>Nouveau reste à percevoir (F)</label><input type="number" id="corriger-reste" value="${resteActuel}" min="0" placeholder="ex: 144000"/></div>
+<div style="font-size:11px;color:var(--muted);margin-bottom:12px" id="corriger-preview">→ Qté déposée corrigée : ${d.qtyDeposited} unités</div>
 <button class="btn btn-amber btn-full" onclick="saveCorrigerDepot('${key}')">✎ Corriger</button>`;
+// Live preview
+setTimeout(()=>{
+  const inp=document.getElementById("corriger-reste");
+  const prev=document.getElementById("corriger-preview");
+  if(inp&&prev){
+    inp.addEventListener("input",()=>{
+      const reste=+inp.value||0;
+      const newQty=prixU>0?Math.round((reste+totalVerse)/prixU):d.qtyDeposited;
+      prev.textContent="→ Qté déposée corrigée : "+newQty+" unités";
+    });
+  }
+},100);
 }
 }
 window.showDepotAction=showDepotAction;
 
 async function saveCorrigerDepot(key){
 const d=getDepots().find(d=>d._key===key);if(!d)return;
-const newQty=+document.getElementById("corriger-qty").value;
-if(isNaN(newQty)||newQty<0)return alert("Valeur invalide !");
-if(!confirm("Corriger le total déposé de "+d.qtyDeposited+" → "+newQty+" unités ?\nCette action est irréversible."))return;
+const reste=+document.getElementById("corriger-reste").value;
+if(isNaN(reste)||reste<0)return alert("Valeur invalide !");
+const prixU=+d.prixEstime||0;
+const totalVerse=(d.versements||[]).reduce((a,v)=>a+(+v.montant||0),0);
+const newQty=prixU>0?Math.round((reste+totalVerse)/prixU):d.qtyDeposited;
+if(!confirm("Corriger :\n• Reste à percevoir : "+cfa(reste)+"\n• Qté déposée : "+newQty+" unités\n\nContinuer ?"))return;
 await set(ref(db,"depots/"+key),{...d,qtyDeposited:newQty});
 document.getElementById("depot-action-form").innerHTML="";
 openRetourDepot(key);
