@@ -1134,15 +1134,13 @@ alert("❌ Erreur réseau: "+err.message);
 window.handlePhoto=handlePhoto;
 
 function rapportDetailHtml(r){
-const ventesNonDepot=(r.ventes||[]).filter(v=>v.type!=="depot");
-const ventesDepot=(r.ventes||[]).filter(v=>v.type==="depot");
-if(r.source==="zero"||(ventesNonDepot.length===0&&ventesDepot.length===0&&!(r.reappros||[]).length))return`<div style="text-align:center;padding:24px 0"><div style="font-size:40px;margin-bottom:10px">🏖</div><div style="font-weight:800;font-size:15px;margin-bottom:6px">Journée sans vente</div><div style="color:var(--muted);font-size:12px">Aucune transaction ce jour.</div></div>`;
-const gros=ventesNonDepot.filter(v=>v.type==="gros"),det=ventesNonDepot.filter(v=>v.type==="detail"),gifts=ventesNonDepot.filter(v=>v.isGift);
+if(r.source==="zero"||!r.ventes||r.ventes.length===0)return`<div style="text-align:center;padding:24px 0"><div style="font-size:40px;margin-bottom:10px">🏖</div><div style="font-weight:800;font-size:15px;margin-bottom:6px">Journée sans vente</div><div style="color:var(--muted);font-size:12px">Aucune transaction ce jour.</div></div>`;
+const gros=r.ventes.filter(v=>v.type==="gros"),det=r.ventes.filter(v=>v.type==="detail"),gifts=r.ventes.filter(v=>v.isGift);
 function lignes(list){
 if(!list.length)return`<p style="color:var(--muted);font-size:12px;padding:6px 0">Aucune vente.</p>`;
 return list.map(v=>`<div class="vente-ligne"><div class="vente-ligne-head"><span class="vente-ligne-prod">${v.productName}</span>${v.isGift?tag("🎁 Cadeau","orange"):""}</div><div class="vl-grid"><div class="vl-cell"><div class="vl-cell-lbl">Qté</div><div class="vl-cell-val">${v.qty}</div></div><div class="vl-cell"><div class="vl-cell-lbl">Prix/u</div><div class="vl-cell-val">${v.isGift?"0 F":cfa(v.price)}</div></div><div class="vl-cell" style="border:1px solid ${v.profit>=0?"#22c55e33":"#ef444433"}"><div class="vl-cell-lbl">Bénéfice</div><div class="vl-cell-val" style="color:${v.profit>=0?"var(--green)":"var(--red)"}">${v.profit>=0?"+":""}${cfa(v.profit)}</div></div></div></div>`).join("");
 }
-return`<div style="font-size:11px;font-weight:800;color:var(--violet);text-transform:uppercase;margin-bottom:8px">⬡ Ventes en Gros</div>${lignes(gros)}<div style="font-size:11px;font-weight:800;color:var(--blue);text-transform:uppercase;margin:12px 0 8px">◎ Ventes au Détail</div>${lignes(det)}${gifts.length?`<div style="font-size:11px;font-weight:800;color:var(--orange);text-transform:uppercase;margin:12px 0 8px">🎁 Cadeaux</div>${lignes(gifts)}`:""}${ventesDepot.length?`<div style="font-size:11px;font-weight:800;color:var(--amber);text-transform:uppercase;margin:12px 0 8px">🏪 Ventes dépôt-vente</div>${ventesDepot.map(v=>`<div class="vente-ligne"><div class="vente-ligne-head"><span class="vente-ligne-prod">${v.productName}</span><span style="font-size:10px;color:var(--amber);font-weight:700">${v.depotNom||""}</span></div><div class="vl-grid"><div class="vl-cell"><div class="vl-cell-lbl">Qté</div><div class="vl-cell-val">${v.qty}</div></div><div class="vl-cell"><div class="vl-cell-lbl">Prix/u</div><div class="vl-cell-val">${cfa(v.price)}</div></div><div class="vl-cell"><div class="vl-cell-lbl">Total</div><div class="vl-cell-val">${cfa((v.price||0)*(v.qty||0))}</div></div></div></div>`).join("")}`:""}${(r.reappros||[]).length?`<div style="font-size:11px;font-weight:800;color:#10b981;text-transform:uppercase;margin:12px 0 8px">📦 Ajouts stock dépôt</div>${(r.reappros||[]).map(rp=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px"><div><span style="font-weight:700">${rp.depotNom||"?"}</span><div style="color:var(--muted);font-size:10px">${rp.productName||""}</div></div><span style="font-family:monospace;font-weight:700;color:#10b981">+${rp.qty} unités</span></div>`).join("")}`:""}
+return`<div style="font-size:11px;font-weight:800;color:var(--violet);text-transform:uppercase;margin-bottom:8px">⬡ Ventes en Gros</div>${lignes(gros)}<div style="font-size:11px;font-weight:800;color:var(--blue);text-transform:uppercase;margin:12px 0 8px">◎ Ventes au Détail</div>${lignes(det)}${gifts.length?`<div style="font-size:11px;font-weight:800;color:var(--orange);text-transform:uppercase;margin:12px 0 8px">🎁 Cadeaux</div>${lignes(gifts)}`:""}${(r.reappros||[]).length?`<div style="font-size:11px;font-weight:800;color:#10b981;text-transform:uppercase;margin:12px 0 8px">📦 Ajouts stock dépôt</div>${(r.reappros||[]).map(rp=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px"><div><span style="font-weight:700">${rp.depotNom||"?"}</span><div style="color:var(--muted);font-size:10px">${rp.productName||""}</div></div><span style="font-family:monospace;font-weight:700;color:#10b981">+${rp.qty} unités</span></div>`).join("")}`:""}
 <div style="background:var(--bg);border-radius:11px;padding:12px;margin-top:14px"><div style="font-weight:800;font-size:11px;color:var(--muted);margin-bottom:10px;text-transform:uppercase">Totaux du jour</div>
 <div class="grid2" style="gap:8px">${[{l:"Bén. Gros",v:cfa(r.totals.benefGros),c:"var(--violet)"},{l:"Bén. Détail",v:cfa(r.totals.benefDetail),c:"var(--blue)"},{l:"Bénéfice net",v:cfa(r.totals.totalProfit),c:"var(--green)"},{l:"Perte cadeaux",v:cfa(r.totals.perteCadeaux),c:"var(--red)"},{l:"CA total",v:cfa(r.totals.totalCA),c:"var(--text)"},{l:"Cadeaux",v:r.totals.nbCadeaux,c:"var(--orange)"}].map(({l,v,c})=>`<div class="prod-cell"><div class="prod-cell-lbl">${l}</div><div class="prod-cell-val" style="color:${c}">${v}</div></div>`).join("")}</div></div>`;
 }
@@ -1353,6 +1351,7 @@ document.getElementById("mrd2-body").innerHTML=`
 <div id="depot-action-tabs" style="display:flex;gap:8px;margin-bottom:14px">
 <button class="btn btn-green btn-sm" style="flex:1" onclick="showDepotAction('${key}','versement')">💰 Versement</button>
 <button class="btn btn-amber btn-sm" style="flex:1" onclick="showDepotAction('${key}','retour')">↩ Retour stock</button>
+${role==="admin"?`<button class="btn btn-ghost btn-sm" style="flex:1" onclick="showDepotAction('${key}','corriger')">✎ Corriger</button>`:""}
 </div>
 <div id="depot-action-form"></div>
 ${(()=>{
@@ -1429,8 +1428,25 @@ el.innerHTML=`<div style="font-weight:800;font-size:12px;margin-bottom:10px">↩
 <input type="hidden" id="dr-qty" value="0"/>
 <button class="btn btn-amber btn-full" onclick="saveRetourDepot('${key}')">↩ Récupérer le stock</button>`;
 }
+if(type==="corriger"){
+el.innerHTML=`<div style="font-weight:800;font-size:12px;margin-bottom:10px">✎ Corriger le total déposé</div>
+<div style="background:#f59e0b14;border:1px solid #f59e0b33;border-radius:9px;padding:10px 12px;margin-bottom:12px;font-size:11px;color:var(--amber)">⚠️ Utilise ça uniquement pour corriger une erreur de comptage. Valeur actuelle : <b>${d.qtyDeposited}</b> unités.</div>
+<div class="field" style="margin-bottom:8px"><label>Nouveau total déposé</label><input type="number" id="corriger-qty" value="${d.qtyDeposited}" min="0"/></div>
+<button class="btn btn-amber btn-full" onclick="saveCorrigerDepot('${key}')">✎ Corriger</button>`;
+}
 }
 window.showDepotAction=showDepotAction;
+
+async function saveCorrigerDepot(key){
+const d=getDepots().find(d=>d._key===key);if(!d)return;
+const newQty=+document.getElementById("corriger-qty").value;
+if(isNaN(newQty)||newQty<0)return alert("Valeur invalide !");
+if(!confirm("Corriger le total déposé de "+d.qtyDeposited+" → "+newQty+" unités ?\nCette action est irréversible."))return;
+await set(ref(db,"depots/"+key),{...d,qtyDeposited:newQty});
+document.getElementById("depot-action-form").innerHTML="";
+openRetourDepot(key);
+}
+window.saveCorrigerDepot=saveCorrigerDepot;
 
 function calcQtyFromMontant(key,montantStr){
 const d=getDepots().find(d=>d._key===key);if(!d)return;
