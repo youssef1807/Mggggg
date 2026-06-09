@@ -1227,20 +1227,6 @@ else{const c=getCredits().find(c=>c._key===val);v.creditKey=val;v.clientCredit=c
 renderEditRapport();
 }
 window.updateEditVenteCreditKey=updateEditVenteCreditKey;
-function updateEditVenteCredit(id,checked){
-const v=editVentes.find(v=>v.id===id);if(!v)return;
-v.isCredit=checked;
-if(!checked){v.clientCredit="";v.creditKey="";}
-renderEditRapport();
-}
-window.updateEditVenteCredit=updateEditVenteCredit;
-function updateEditVenteCreditKey(id,val){
-const v=editVentes.find(v=>v.id===id);if(!v)return;
-if(val==="__nouveau__"||val===""){v.creditKey="";v.clientCredit="";}
-else{const c=getCredits().find(c=>c._key===val);v.creditKey=val;v.clientCredit=c?c.client:"";}
-renderEditRapport();
-}
-window.updateEditVenteCreditKey=updateEditVenteCreditKey;
 function addEditVente(type){editVentes.push({id:Date.now(),productId:"",qty:1,price:0,type,isGift:false});renderEditRapport();}
 window.addEditVente=addEditVente;
 function removeEditVente(id){editVentes=editVentes.filter(v=>v.id!==id);renderEditRapport();}
@@ -1723,29 +1709,6 @@ window.saveDepenses=saveDepenses;
 function openAddAvanceNour(mois){
 const d=new Date();
 const dd=String(d.getDate()).padStart(2,"0");
-const h=`<div class="overlay" id="modal-avance-nour" style="display:flex"><div class="sheet"><div class="sheet-handle"></div><div class="sheet-header"><span class="sheet-title">👩 Avance Nour</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-avance-nour');document.getElementById('modal-avance-nour').remove()">✕</button></div><div class="sheet-body"><div class="field"><label>Date</label><input type="date" id="avance-date" value="${mois}-${dd}"/></div><div class="field"><label>Montant (F CFA)</label><input type="number" id="avance-montant" placeholder="ex: 5000" min="0"/></div><div class="field"><label>Note (optionnel)</label><input type="text" id="avance-note" placeholder="ex: Avance semaine 1"/></div></div><div class="sheet-footer"><button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-avance-nour');document.getElementById('modal-avance-nour').remove()">Annuler</button><button class="btn btn-red" style="flex:2" onclick="saveAvanceNour()">💾 Enregistrer</button></div></div></div>`;
-document.body.insertAdjacentHTML("beforeend",h);
-setTimeout(()=>document.getElementById("avance-montant")?.focus(),300);
-}
-window.openAddAvanceNour=openAddAvanceNour;
-
-async function saveAvanceNour(){
-const date=document.getElementById("avance-date").value;
-const montant=+document.getElementById("avance-montant").value;
-const note=document.getElementById("avance-note").value.trim();
-if(!date||!montant)return alert("Date et montant obligatoires !");
-const k=push(ref(db,"depenses")).key;
-const mois=date.slice(0,7);
-await set(ref(db,"depenses/"+k),{_key:k,date,mois,cat:"Avance Nour",montant,note:note||""});
-closeModal("modal-avance-nour");
-document.getElementById("modal-avance-nour")?.remove();
-render();
-}
-window.saveAvanceNour=saveAvanceNour;
-
-function openAddAvanceNour(mois){
-const d=new Date();
-const dd=String(d.getDate()).padStart(2,"0");
 const html=`<div class="overlay" id="modal-avance-nour" style="display:flex"><div class="sheet"><div class="sheet-handle"></div><div class="sheet-header"><span class="sheet-title">👩 Avance Nour</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-avance-nour');document.getElementById('modal-avance-nour').remove()">✕</button></div><div class="sheet-body"><div class="field"><label>Date</label><input type="date" id="avance-date" value="${mois}-${dd}"/></div><div class="field"><label>Montant (F CFA)</label><input type="number" id="avance-montant" placeholder="ex: 5000" min="0"/></div><div class="field"><label>Note (optionnel)</label><input type="text" id="avance-note" placeholder="ex: Avance semaine 1"/></div></div><div class="sheet-footer"><button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-avance-nour');document.getElementById('modal-avance-nour').remove()">Annuler</button><button class="btn btn-red" style="flex:2" onclick="saveAvanceNour()">💾 Enregistrer</button></div></div></div>`;
 document.body.insertAdjacentHTML("beforeend",html);
 setTimeout(()=>document.getElementById("avance-montant")?.focus(),300);
@@ -1759,12 +1722,24 @@ const note=document.getElementById("avance-note").value.trim();
 if(!date||!montant)return alert("Date et montant obligatoires !");
 const k=push(ref(db,"depenses")).key;
 const mois=date.slice(0,7);
-await set(ref(db,"depenses/"+k),{_key:k,date,mois,cat:"Avance Nour",montant,note:note||""});
+await set(ref(db,"depenses/"+k),{_key:k,date,mois,cat:"Avance Nour",montant,note:note||"",solde:false});
 closeModal("modal-avance-nour");
 document.getElementById("modal-avance-nour")?.remove();
 render();
 }
 window.saveAvanceNour=saveAvanceNour;
+
+async function solderAvancesNour(){
+const avances=getDepenses().filter(d=>d.cat==="Avance Nour"&&!d.solde);
+const total=avances.reduce((a,d)=>a+(+d.montant||0),0);
+if(!confirm("Solder les avances de Nour ?\nTotal: "+cfa(total)+"\nLe compteur repart à 0."))return;
+for(const d of avances){
+  await set(ref(db,"depenses/"+d._key),{...d,solde:true});
+}
+alert("✅ Avances de Nour soldées — "+cfa(total));
+render();
+}
+window.solderAvancesNour=solderAvancesNour;
 
 function addEditDepenseLigne(){
 const c=document.getElementById("med-lignes");
@@ -1821,6 +1796,7 @@ getRetraits().forEach(r=>{if(r.mois)allMonthsWithData.add(r.mois);});
 getRapports().forEach(r=>{if(r.date)allMonthsWithData.add(r.date.slice(0,7));});
 const moisList=Array.from(allMonthsWithData).sort((a,b)=>b.localeCompare(a));
 // Show current month always, others only if they have data
+const currentMonthKey=today().slice(0,7);
 const moisCards=moisList.map(mk=>{
 const depList=getDepensesForMonthAll(mk);
 const dep=depList.length>0?{lignes:depList.map(d=>({cat:d.cat,montant:d.montant})),total:depList.reduce((a,d)=>a+(+d.montant||0),0)}:null;
@@ -1871,28 +1847,19 @@ return`<div class="depense-card"><div style="display:flex;justify-content:space-
 ${depList.length>0?`${depList.sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(d=>`<div class="depense-row" style="align-items:center"><div style="flex:1"><span class="depense-cat">${d.cat}</span>${d.note?`<div style="font-size:10px;color:var(--muted)">${d.note}</div>`:""}<div style="font-size:10px;color:var(--muted)">${d.date||d.mois}</div></div><div style="display:flex;align-items:center;gap:6px"><span class="depense-montant">-${cfa(d.montant)}</span><button onclick="openEditDepenses('${d._key}')" style="background:#3b82f622;border:1px solid #3b82f644;color:var(--blue);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✎</button><button onclick="deleteDepense('${d._key}')" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button></div></div>`).join("")}
 <div class="bilan-total" style="padding-top:8px;padding-bottom:8px;border-bottom:1px solid var(--border)"><span class="bilan-total-label" style="font-size:12px">Total dépenses</span><span style="font-family:monospace;font-weight:800;font-size:14px;color:var(--red)">-${cfa(dep.total)}</span></div>`:`<div style="color:var(--muted);font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)">Aucune dépense ce mois</div>`}
 <div style="margin-top:10px">${retraitsSection}</div>
-<div style="background:var(--bg);border-radius:10px;padding:10px 12px;margin-top:8px;margin-bottom:8px">
+${mk===currentMonthKey?`<div style="background:var(--bg);border-radius:10px;padding:10px 12px;margin-top:8px;margin-bottom:8px">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
 <span style="font-weight:800;font-size:12px">👩 Avances Nour</span>
 <div style="display:flex;gap:6px;align-items:center">
-<span style="font-family:monospace;font-weight:800;font-size:13px;color:var(--red)">${cfa(depList.filter(d=>d.cat==="Avance Nour").reduce((a,d)=>a+(+d.montant||0),0))}</span>
+<span style="font-family:monospace;font-weight:800;font-size:13px;color:var(--red)">${cfa(getDepenses().filter(d=>d.cat==="Avance Nour"&&!d.solde).reduce((a,d)=>a+(+d.montant||0),0))}</span>
 <button class="btn btn-red btn-sm" style="padding:3px 8px;font-size:10px" onclick="openAddAvanceNour('${mk}')">+</button>
+${getDepenses().filter(d=>d.cat==="Avance Nour"&&!d.solde).length>0?`<button class="btn btn-green btn-sm" style="padding:3px 8px;font-size:10px" onclick="solderAvancesNour()">✓ Solder</button>`:""}
 </div>
 </div>
-${depList.filter(d=>d.cat==="Avance Nour").length===0?`<div style="font-size:11px;color:var(--muted)">Aucune avance ce mois</div>`:""}
-${depList.filter(d=>d.cat==="Avance Nour").sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(d=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><div><span style="color:var(--muted)">${d.date}</span>${d.note?` · <span style="color:var(--muted)">${d.note}</span>`:""}</div><div style="display:flex;align-items:center;gap:6px"><span style="font-family:monospace;color:var(--red)">-${cfa(d.montant)}</span><button onclick="openEditDepenses('${d._key}')" style="background:#3b82f622;border:1px solid #3b82f644;color:var(--blue);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✎</button><button onclick="deleteDepense('${d._key}')" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button></div></div>`).join("")}
-</div>
-<div style="background:var(--bg);border-radius:10px;padding:10px 12px;margin-top:8px;margin-bottom:8px">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-<span style="font-weight:800;font-size:12px">👩 Avances Nour</span>
-<div style="display:flex;gap:6px;align-items:center">
-<span style="font-family:monospace;font-weight:800;font-size:13px;color:var(--red)">${cfa(depList.filter(d=>d.cat==="Avance Nour").reduce((a,d)=>a+(+d.montant||0),0))}</span>
-<button class="btn btn-red btn-sm" style="padding:3px 8px;font-size:10px" onclick="openAddAvanceNour('${mk}')">+</button>
-</div>
-</div>
-${depList.filter(d=>d.cat==="Avance Nour").length===0?`<div style="font-size:11px;color:var(--muted)">Aucune avance ce mois</div>`:""}
-${depList.filter(d=>d.cat==="Avance Nour").sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(d=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><div><span style="color:var(--muted)">${d.date}</span>${d.note?` · <span style="color:var(--muted)">${d.note}</span>`:""}</div><div style="display:flex;align-items:center;gap:6px"><span style="font-family:monospace;color:var(--red)">-${cfa(d.montant)}</span><button onclick="openEditDepenses('${d._key}')" style="background:#3b82f622;border:1px solid #3b82f644;color:var(--blue);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✎</button><button onclick="deleteDepense('${d._key}')" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button></div></div>`).join("")}
-</div>
+${getDepenses().filter(d=>d.cat==="Avance Nour"&&!d.solde).length===0?`<div style="font-size:11px;color:var(--muted)">Aucune avance en cours</div>`:""}
+${getDepenses().filter(d=>d.cat==="Avance Nour"&&!d.solde).sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(d=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><div><span style="color:var(--muted)">${d.date}</span>${d.note?` · <span style="color:var(--muted)">${d.note}</span>`:""}</div><div style="display:flex;align-items:center;gap:6px"><span style="font-family:monospace;color:var(--red)">-${cfa(d.montant)}</span><button onclick="deleteDepense('${d._key}')" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button></div></div>`).join("")}
+${getDepenses().filter(d=>d.cat==="Avance Nour"&&d.solde).length>0?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)">Soldées : ${cfa(getDepenses().filter(d=>d.cat==="Avance Nour"&&d.solde).reduce((a,d)=>a+(+d.montant||0),0))}</div>`:""}
+</div>`:""}
 <div style="background:var(--bg);border-radius:9px;padding:10px 12px;margin-top:8px">
 <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;color:var(--muted)">Bénéfice brut</span><span style="font-family:monospace;font-size:12px;color:var(--green)">+${cfa(Math.round(ms.profit))}</span></div>
 ${dep?`<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;color:var(--muted)">Dépenses</span><span style="font-family:monospace;font-size:12px;color:var(--red)">-${cfa(dep.total)}</span></div>`:""}
@@ -2121,16 +2088,6 @@ Object.values(allDays).forEach(day=>{
 const soldeActuel=soldeDepart+totalEntrees-totalSorties;
 window._soldeCaisseActuel=soldeActuel;
 
-// Solde de fin de journée cumulé
-const sortedAsc=[...sortedDates].sort((a,b)=>a.localeCompare(b));
-const soldeFin={};
-let soldeCumul=soldeDepart;
-sortedAsc.forEach(date=>{
-  const day=allDays[date];
-  soldeCumul+=day.entrees.reduce((a,e)=>a+e.montant,0)-day.sorties.reduce((a,s)=>a+s.montant,0);
-  soldeFin[date]=soldeCumul;
-});
-
 el.innerHTML=`
 <div class="sec-head"><span class="sec-title">🏦 Caisse</span>
 <div style="display:flex;gap:6px">
@@ -2183,10 +2140,6 @@ ${(day.notes||[]).map(n=>`<div style="display:flex;justify-content:space-between
 <span style="color:var(--muted);font-style:italic">${n.label}</span>
 <span style="font-family:monospace;color:var(--muted)">ℹ️ ${cfa(n.montant)}</span>
 </div>`).join("")}
-<div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;margin-top:4px;border-top:2px solid var(--border)">
-<span style="font-size:11px;font-weight:700;color:var(--muted)">💰 Solde fin de journée</span>
-<span style="font-family:monospace;font-weight:800;font-size:13px;color:${soldeFin[date]>=0?"var(--green)":"var(--red)"}">${cfa(Math.round(soldeFin[date]))}</span>
-</div>
 </div>`;
 }).join("")}`;
 }
@@ -2813,12 +2766,9 @@ ${!solde?`<div style="display:flex;gap:6px">
 </div>`:`<div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" style="flex:1" onclick="editCredit('${c._key}')">✎ Modifier</button><button class="btn btn-ghost btn-sm btn-full" style="flex:1" onclick="deleteCredit('${c._key}')">✕ Supprimer</button></div>`}
 ${((c.historique||[]).length||(c.remboursements||[]).length)?`<div style="margin-top:10px">
 <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">📋 Historique</div>
-${(c.historique||[]).map((h,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
+${(c.historique||[]).map(h=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
 <div><span style="color:var(--muted)">${h.date}</span><div style="font-size:10px;color:var(--muted)">${h.note||""}</div></div>
-<div style="display:flex;align-items:center;gap:6px">
 <span style="font-family:monospace;color:var(--red)">+${cfa(h.montant)}</span>
-<button onclick="deleteHistoriqueCredit('${c._key}',${i})" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button>
-</div>
 </div>`).join("")}
 ${(c.remboursements||[]).map((r,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
 <span style="color:var(--muted)">${r.date} · Remb.</span>
@@ -3018,19 +2968,6 @@ alert("✅ Remboursement supprimé !");
 render();
 }
 window.deleteRemboursement=deleteRemboursement;
-
-async function deleteHistoriqueCredit(creditKey,index){
-const c=getCredits().find(c=>c._key===creditKey);if(!c)return;
-const h=c.historique||[];
-const ligne=h[index];if(!ligne)return;
-if(!confirm("Supprimer cette ligne ?\n"+ligne.date+" · "+cfa(ligne.montant)+"\n⚠️ Le montant sera ajusté."))return;
-const newHistorique=h.filter((_,i)=>i!==index);
-const newMontantInitial=Math.max(0,(+c.montantInitial||0)-(+ligne.montant||0));
-const newMontantRestant=Math.max(0,(+c.montantRestant||0)-(+ligne.montant||0));
-await set(ref(db,"credits/"+creditKey),{...c,historique:newHistorique,montantInitial:newMontantInitial,montantRestant:newMontantRestant});
-render();
-}
-window.deleteHistoriqueCredit=deleteHistoriqueCredit;
 
 function editRetrait(key){
 const r=getRetraits().find(x=>x._key===key);if(!r)return;
