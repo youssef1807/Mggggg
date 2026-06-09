@@ -454,7 +454,7 @@ const MONTHS_FULL=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","A
 
 let role=null,selectedLoginRole=null;
 let rapportMode="choose";
-let currentRapport={ventes:[],reappros:[]};
+let currentRapport={ventes:[]};
 let rapportDate=new Date().toISOString().slice(0,10);
 let editingRapportId=null,editVentes=[];
 let currentTab="rapport";
@@ -690,7 +690,7 @@ render();
 }
 
 function logout(){
-role=null;selectedLoginRole=null;rapportMode="choose";currentRapport={ventes:[],reappros:[]};rapportDate=new Date().toISOString().slice(0,10);
+role=null;selectedLoginRole=null;rapportMode="choose";currentRapport={ventes:[]};rapportDate=new Date().toISOString().slice(0,10);
 document.getElementById("app").style.display="none";
 document.getElementById("login-screen").style.display="flex";
 document.getElementById("login-form").style.display="none";
@@ -824,12 +824,6 @@ setTimeout(()=>currentRapport.ventes.filter(x=>x.type!=="depot").forEach(x=>refr
 }
 window.selectClientCredit=selectClientCredit;
 
-function addReappro(){if(!currentRapport.reappros)currentRapport.reappros=[];currentRapport.reappros.push({depotKey:"",productId:"",qty:1,prix:0});renderRapport();}
-window.addReappro=addReappro;
-function removeReappro(i){currentRapport.reappros.splice(i,1);renderRapport();}
-window.removeReappro=removeReappro;
-function updateReappro(i,field,val){if(!currentRapport.reappros)currentRapport.reappros=[];currentRapport.reappros[i][field]=val;if(field==="depotKey"||field==="productId")renderRapport();}
-window.updateReappro=updateReappro;
 function addVente(type){currentRapport.ventes.push({id:Date.now(),productId:"",qty:1,price:0,type,isCredit:false,clientCredit:""});renderRapport();}
 window.addVente=addVente;
 
@@ -901,8 +895,7 @@ nbVentes:ventes.length,
 
 async function validerRapport(){
 const ventes=currentRapport.ventes;
-const reappros=currentRapport.reappros||[];
-if(!ventes.length&&!reappros.filter(r=>r.depotKey&&r.qty&&r.productId).length)return alert("Ajoute au moins une vente ou une réappro dépôt !");
+if(!ventes.length)return alert("Ajoute au moins une vente !");
 const lignesDepot=ventes.filter(v=>v.type==="depot");
 const lignesVente=ventes.filter(v=>v.type!=="depot");
 // Validation des lignes dépôt
@@ -953,19 +946,9 @@ const p=getP(v.productId);
 await fbSetProduct({...p,stock:p.stock-v.qty});
 await fbAddMove({productId:p.id,productName:p.name,type:"out",qty:v.qty,date:dateStr,note:v.isGift?"Cadeau":"Vente "+v.type});
 }
-// Traiter les réappros stock dépôt
-for(const r of reappros){
-  if(!r.depotKey||!r.qty||!r.productId)continue;
-  const depR=getDepots().find(x=>x._key===r.depotKey);if(!depR)continue;
-  const pR=getP(r.productId);
-  if(pR&&r.qty>pR.stock){alert("Stock insuffisant pour réappro dépôt \""+depR.lieu+"\" (stock: "+pR.stock+")");return;}
-  await set(ref(db,"depots/"+r.depotKey),{...depR,qtyDeposited:(+depR.qtyDeposited||0)+(+r.qty),productId:r.productId,productName:pR?pR.name:depR.productName,prixEstime:+r.prix||+depR.prixEstime||0});
-  if(pR)await fbSetProduct({...pR,stock:pR.stock-r.qty});
-  await fbAddMove({productId:pR?pR.id:r.productId,productName:pR?pR.name:depR.productName,type:"out",qty:r.qty,date:dateStr,note:"Réappro dépôt: "+depR.lieu});
-}
 // Enregistrer le rapport
 const tousVentes=[...ventesF,...lignesDepot.map(v=>{const p=getP(v.productId);return{...v,productName:p.name,costPrice:p.costPrice,profit:0,isGift:false};})];
-await fbAddRapport({date:dateStr,ventes:tousVentes,reappros:reappros.filter(r=>r.depotKey&&r.qty&&r.productId).map(r=>{const d=getDepots().find(x=>x._key===r.depotKey);const p=getP(r.productId);return{depotKey:r.depotKey,depotNom:d?d.lieu:"?",productId:r.productId,productName:p?p.name:"?",qty:+r.qty,prix:+r.prix||0};}),totals:calcTotals(ventesF),source:"manual"});
+await fbAddRapport({date:dateStr,ventes:tousVentes,reappros:reappros.filter(r=>r.depotKey&&r.qty).map(r=>{const d=getDepots().find(x=>x._key===r.depotKey);return{depotKey:r.depotKey,depotNom:d?d.lieu:"?",productName:d?d.productName:"?",qty:+r.qty};}),totals:calcTotals(ventesF),source:"manual"});
 for(const v of ventesF.filter(v=>!v.isGift)){
 await fbAddSale({productId:+v.productId,productName:v.productName,qty:v.qty,salePrice:v.price,costPrice:v.costPrice,type:v.type,date:dateStr,profit:v.profit,isCredit:!!v.isCredit});
 }
@@ -997,7 +980,7 @@ if(v.creditKey&&v.creditKey!=="__nouveau__"){
   }
 }
 }
-currentRapport={ventes:[],reappros:[]};rapportMode="choose";rapportDate=new Date().toISOString().slice(0,10);
+currentRapport={ventes:[]};rapportMode="choose";rapportDate=new Date().toISOString().slice(0,10);
 let msg="✅ Rapport validé !";
 if(lignesDepot.length)msg+="\n📦 "+lignesDepot.length+" dépôt(s) réapprovisionné(s)";
 if(ventesCredit.length)msg+="\n🤝 "+ventesCredit.length+" crédit(s) créé(s) automatiquement";
@@ -1157,7 +1140,7 @@ function lignes(list){
 if(!list.length)return`<p style="color:var(--muted);font-size:12px;padding:6px 0">Aucune vente.</p>`;
 return list.map(v=>`<div class="vente-ligne"><div class="vente-ligne-head"><span class="vente-ligne-prod">${v.productName}</span>${v.isGift?tag("🎁 Cadeau","orange"):""}</div><div class="vl-grid"><div class="vl-cell"><div class="vl-cell-lbl">Qté</div><div class="vl-cell-val">${v.qty}</div></div><div class="vl-cell"><div class="vl-cell-lbl">Prix/u</div><div class="vl-cell-val">${v.isGift?"0 F":cfa(v.price)}</div></div><div class="vl-cell" style="border:1px solid ${v.profit>=0?"#22c55e33":"#ef444433"}"><div class="vl-cell-lbl">Bénéfice</div><div class="vl-cell-val" style="color:${v.profit>=0?"var(--green)":"var(--red)"}">${v.profit>=0?"+":""}${cfa(v.profit)}</div></div></div></div>`).join("");
 }
-return`<div style="font-size:11px;font-weight:800;color:var(--violet);text-transform:uppercase;margin-bottom:8px">⬡ Ventes en Gros</div>${lignes(gros)}<div style="font-size:11px;font-weight:800;color:var(--blue);text-transform:uppercase;margin:12px 0 8px">◎ Ventes au Détail</div>${lignes(det)}${gifts.length?`<div style="font-size:11px;font-weight:800;color:var(--orange);text-transform:uppercase;margin:12px 0 8px">🎁 Cadeaux</div>${lignes(gifts)}`:""}${(r.reappros||[]).length?`<div style="font-size:11px;font-weight:800;color:#10b981;text-transform:uppercase;margin:12px 0 8px">📦 Ajouts stock dépôt</div>${(r.reappros||[]).map(rp=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px"><div><span style="font-weight:700">${rp.depotNom||"?"}</span><div style="color:var(--muted);font-size:10px">${rp.productName||""}</div></div><span style="font-family:monospace;font-weight:700;color:#10b981">+${rp.qty} unités${rp.prix?` · ${cfa(rp.prix)}/u`:""}</span></div>`).join("")}`:""}
+return`<div style="font-size:11px;font-weight:800;color:var(--violet);text-transform:uppercase;margin-bottom:8px">⬡ Ventes en Gros</div>${lignes(gros)}<div style="font-size:11px;font-weight:800;color:var(--blue);text-transform:uppercase;margin:12px 0 8px">◎ Ventes au Détail</div>${lignes(det)}${gifts.length?`<div style="font-size:11px;font-weight:800;color:var(--orange);text-transform:uppercase;margin:12px 0 8px">🎁 Cadeaux</div>${lignes(gifts)}`:""}${(r.reappros||[]).length?`<div style="font-size:11px;font-weight:800;color:#10b981;text-transform:uppercase;margin:12px 0 8px">📦 Ajouts stock dépôt</div>${(r.reappros||[]).map(rp=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px"><div><span style="font-weight:700">${rp.depotNom||"?"}</span><div style="color:var(--muted);font-size:10px">${rp.productName||""}</div></div><span style="font-family:monospace;font-weight:700;color:#10b981">+${rp.qty} unités</span></div>`).join("")}`:""}
 <div style="background:var(--bg);border-radius:11px;padding:12px;margin-top:14px"><div style="font-weight:800;font-size:11px;color:var(--muted);margin-bottom:10px;text-transform:uppercase">Totaux du jour</div>
 <div class="grid2" style="gap:8px">${[{l:"Bén. Gros",v:cfa(r.totals.benefGros),c:"var(--violet)"},{l:"Bén. Détail",v:cfa(r.totals.benefDetail),c:"var(--blue)"},{l:"Bénéfice net",v:cfa(r.totals.totalProfit),c:"var(--green)"},{l:"Perte cadeaux",v:cfa(r.totals.perteCadeaux),c:"var(--red)"},{l:"CA total",v:cfa(r.totals.totalCA),c:"var(--text)"},{l:"Cadeaux",v:r.totals.nbCadeaux,c:"var(--orange)"}].map(({l,v,c})=>`<div class="prod-cell"><div class="prod-cell-lbl">${l}</div><div class="prod-cell-val" style="color:${c}">${v}</div></div>`).join("")}</div></div>`;
 }
@@ -2090,6 +2073,16 @@ Object.values(allDays).forEach(day=>{
 const soldeActuel=soldeDepart+totalEntrees-totalSorties;
 window._soldeCaisseActuel=soldeActuel;
 
+// Solde de fin de journée cumulé
+const sortedAsc=[...sortedDates].sort((a,b)=>a.localeCompare(b));
+const soldeFin={};
+let soldeCumul=soldeDepart;
+sortedAsc.forEach(date=>{
+  const day=allDays[date];
+  soldeCumul+=day.entrees.reduce((a,e)=>a+e.montant,0)-day.sorties.reduce((a,s)=>a+s.montant,0);
+  soldeFin[date]=soldeCumul;
+});
+
 el.innerHTML=`
 <div class="sec-head"><span class="sec-title">🏦 Caisse</span>
 <div style="display:flex;gap:6px">
@@ -2142,6 +2135,10 @@ ${(day.notes||[]).map(n=>`<div style="display:flex;justify-content:space-between
 <span style="color:var(--muted);font-style:italic">${n.label}</span>
 <span style="font-family:monospace;color:var(--muted)">ℹ️ ${cfa(n.montant)}</span>
 </div>`).join("")}
+<div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;margin-top:4px;border-top:2px solid var(--border)">
+<span style="font-size:11px;font-weight:700;color:var(--muted)">💰 Solde fin de journée</span>
+<span style="font-family:monospace;font-weight:800;font-size:13px;color:${soldeFin[date]>=0?"var(--green)":"var(--red)"}">${cfa(Math.round(soldeFin[date]))}</span>
+</div>
 </div>`;
 }).join("")}`;
 }
@@ -3118,12 +3115,11 @@ el.innerHTML=`<div style="font-weight:800;font-size:16px;margin-bottom:2px">📋
 return;
 }
 const v=currentRapport.ventes,g=v.filter(x=>x.type==="gros"),d=v.filter(x=>x.type==="detail"),dep=v.filter(x=>x.type==="depot");
-el.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px"><button onclick="rapportMode='choose';currentRapport={ventes:[],reappros:[]};renderRapport()" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer">←</button><span style="font-weight:800;font-size:16px">📋 Rapport Journalier</span></div><div style="font-size:11px;color:var(--muted);margin-bottom:14px;margin-left:28px">${dateLabel(rapportDate)}</div>
+el.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px"><button onclick="rapportMode='choose';currentRapport={ventes:[]};renderRapport()" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer">←</button><span style="font-weight:800;font-size:16px">📋 Rapport Journalier</span></div><div style="font-size:11px;color:var(--muted);margin-bottom:14px;margin-left:28px">${dateLabel(rapportDate)}</div>
 ${dep.length?`<div class="rapport-section" style="border-color:#f59e0b55"><div class="rapport-section-title" style="color:var(--amber)">🏪 Réappro Dépôts-vente</div>${dep.map(venteItemHtml).join("")}<button class="btn btn-amber btn-sm btn-full" onclick="addVente('depot')" style="margin-top:4px">+ Ajouter réappro dépôt</button></div>`:""}
-<div class="rapport-section" style="border-color:#10b98155"><div class="rapport-section-title" style="color:#10b981">📦 Ajout stock dépôt</div>${(currentRapport.reappros||[]).map((r,i)=>`<div style="background:var(--bg);border-radius:9px;padding:10px 12px;margin-bottom:8px;border:1px solid #10b98133"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-size:11px;font-weight:700;color:#10b981">📦 Réappro #${i+1}</span><button onclick="removeReappro(${i})" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer">✕</button></div><div class="field" style="margin-bottom:8px"><label>Dépôt</label><select onchange="updateReappro(${i},'depotKey',this.value)"><option value="">— Choisir dépôt —</option>${getDepots().filter(d=>d.status==="open").map(d=>`<option value="${d._key}" ${r.depotKey===d._key?"selected":""}>${d.lieu}</option>`).join("")}</select></div><div class="field" style="margin-bottom:8px"><label>Produit</label><select onchange="updateReappro(${i},'productId',this.value)"><option value="">— Choisir produit —</option>${getProducts().map(p=>`<option value="${p.id}" ${r.productId==p.id?"selected":""}>${p.name} (stock: ${p.stock})</option>`).join("")}</select></div><div class="grid2"><div class="field"><label>Quantité</label><input type="number" min="1" value="${r.qty||""}" placeholder="ex: 10" onchange="updateReappro(${i},'qty',+this.value)"/></div><div class="field"><label>Prix/u (F)</label><input type="number" min="0" value="${r.prix||""}" placeholder="ex: 2000" onchange="updateReappro(${i},'prix',+this.value)"/></div></div></div>`).join("")}<button class="btn btn-sm btn-full" style="background:#10b98114;border:1px solid #10b98133;color:#10b981;margin-top:4px" onclick="addReappro()">+ Ajouter réappro stock</button></div>
 <div class="rapport-section"><div class="rapport-section-title" style="color:var(--violet)">⬡ Ventes en Gros</div>${g.map(venteItemHtml).join("")}<button class="btn btn-violet btn-sm btn-full" onclick="addVente('gros')" style="margin-top:4px">+ Ajouter vente gros</button></div><div class="rapport-section"><div class="rapport-section-title" style="color:var(--blue)">◎ Ventes au Détail</div>${d.map(venteItemHtml).join("")}<button class="btn btn-primary btn-sm btn-full" onclick="addVente('detail')" style="margin-top:4px">+ Ajouter vente détail</button></div>
 ${dep.length?`<div style="background:#f59e0b14;border:1px solid #f59e0b33;border-radius:12px;padding:12px;margin-bottom:10px;font-size:12px;color:var(--amber)">⚠️ Vérifie bien les dépôts destinataires avant de valider !</div>`:""}
-${v.length||(currentRapport.reappros||[]).filter(r=>r.depotKey&&r.qty&&r.productId).length?`<div class="card"><div style="font-weight:800;font-size:12px;margin-bottom:8px">⚡ Récap en cours</div><div class="grid3"><div class="prod-cell"><div class="prod-cell-lbl">Ventes</div><div class="prod-cell-val">${g.length+d.length}</div></div><div class="prod-cell"><div class="prod-cell-lbl">Gros</div><div class="prod-cell-val" style="color:var(--violet)">${g.length}</div></div><div class="prod-cell"><div class="prod-cell-lbl">Dépôts</div><div class="prod-cell-val" style="color:var(--amber)">${dep.length}</div></div></div></div><button class="btn btn-green btn-full" onclick="validerRapport()" style="padding:14px">✅ Valider le rapport du jour</button>`:`<div class="empty">Ajoute des ventes ou scanne ton cahier 📷</div>`}`;
+${v.length?`<div class="card"><div style="font-weight:800;font-size:12px;margin-bottom:8px">⚡ Récap en cours</div><div class="grid3"><div class="prod-cell"><div class="prod-cell-lbl">Ventes</div><div class="prod-cell-val">${g.length+d.length}</div></div><div class="prod-cell"><div class="prod-cell-lbl">Gros</div><div class="prod-cell-val" style="color:var(--violet)">${g.length}</div></div><div class="prod-cell"><div class="prod-cell-lbl">Dépôts</div><div class="prod-cell-val" style="color:var(--amber)">${dep.length}</div></div></div></div><button class="btn btn-green btn-full" onclick="validerRapport()" style="padding:14px">✅ Valider le rapport du jour</button>`:`<div class="empty">Ajoute des ventes ou scanne ton cahier 📷</div>`}`;
 v.filter(x=>x.type!=="depot").forEach(x=>refreshPreview(x.id));
 }
 
