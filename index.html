@@ -948,7 +948,7 @@ await fbAddMove({productId:p.id,productName:p.name,type:"out",qty:v.qty,date:dat
 }
 // Enregistrer le rapport
 const tousVentes=[...ventesF,...lignesDepot.map(v=>{const p=getP(v.productId);return{...v,productName:p.name,costPrice:p.costPrice,profit:0,isGift:false};})];
-await fbAddRapport({date:dateStr,ventes:tousVentes,totals:calcTotals(ventesF),source:"manual"});
+await fbAddRapport({date:dateStr,ventes:tousVentes,reappros:reappros.filter(r=>r.depotKey&&r.qty).map(r=>{const d=getDepots().find(x=>x._key===r.depotKey);return{depotKey:r.depotKey,depotNom:d?d.lieu:"?",productName:d?d.productName:"?",qty:+r.qty};}),totals:calcTotals(ventesF),source:"manual"});
 for(const v of ventesF.filter(v=>!v.isGift)){
 await fbAddSale({productId:+v.productId,productName:v.productName,qty:v.qty,salePrice:v.price,costPrice:v.costPrice,type:v.type,date:dateStr,profit:v.profit,isCredit:!!v.isCredit});
 }
@@ -1140,7 +1140,7 @@ function lignes(list){
 if(!list.length)return`<p style="color:var(--muted);font-size:12px;padding:6px 0">Aucune vente.</p>`;
 return list.map(v=>`<div class="vente-ligne"><div class="vente-ligne-head"><span class="vente-ligne-prod">${v.productName}</span>${v.isGift?tag("🎁 Cadeau","orange"):""}</div><div class="vl-grid"><div class="vl-cell"><div class="vl-cell-lbl">Qté</div><div class="vl-cell-val">${v.qty}</div></div><div class="vl-cell"><div class="vl-cell-lbl">Prix/u</div><div class="vl-cell-val">${v.isGift?"0 F":cfa(v.price)}</div></div><div class="vl-cell" style="border:1px solid ${v.profit>=0?"#22c55e33":"#ef444433"}"><div class="vl-cell-lbl">Bénéfice</div><div class="vl-cell-val" style="color:${v.profit>=0?"var(--green)":"var(--red)"}">${v.profit>=0?"+":""}${cfa(v.profit)}</div></div></div></div>`).join("");
 }
-return`<div style="font-size:11px;font-weight:800;color:var(--violet);text-transform:uppercase;margin-bottom:8px">⬡ Ventes en Gros</div>${lignes(gros)}<div style="font-size:11px;font-weight:800;color:var(--blue);text-transform:uppercase;margin:12px 0 8px">◎ Ventes au Détail</div>${lignes(det)}${gifts.length?`<div style="font-size:11px;font-weight:800;color:var(--orange);text-transform:uppercase;margin:12px 0 8px">🎁 Cadeaux</div>${lignes(gifts)}`:""}
+return`<div style="font-size:11px;font-weight:800;color:var(--violet);text-transform:uppercase;margin-bottom:8px">⬡ Ventes en Gros</div>${lignes(gros)}<div style="font-size:11px;font-weight:800;color:var(--blue);text-transform:uppercase;margin:12px 0 8px">◎ Ventes au Détail</div>${lignes(det)}${gifts.length?`<div style="font-size:11px;font-weight:800;color:var(--orange);text-transform:uppercase;margin:12px 0 8px">🎁 Cadeaux</div>${lignes(gifts)}`:""}${(r.reappros||[]).length?`<div style="font-size:11px;font-weight:800;color:#10b981;text-transform:uppercase;margin:12px 0 8px">📦 Ajouts stock dépôt</div>${(r.reappros||[]).map(rp=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px"><div><span style="font-weight:700">${rp.depotNom||"?"}</span><div style="color:var(--muted);font-size:10px">${rp.productName||""}</div></div><span style="font-family:monospace;font-weight:700;color:#10b981">+${rp.qty} unités</span></div>`).join("")}`:""}
 <div style="background:var(--bg);border-radius:11px;padding:12px;margin-top:14px"><div style="font-weight:800;font-size:11px;color:var(--muted);margin-bottom:10px;text-transform:uppercase">Totaux du jour</div>
 <div class="grid2" style="gap:8px">${[{l:"Bén. Gros",v:cfa(r.totals.benefGros),c:"var(--violet)"},{l:"Bén. Détail",v:cfa(r.totals.benefDetail),c:"var(--blue)"},{l:"Bénéfice net",v:cfa(r.totals.totalProfit),c:"var(--green)"},{l:"Perte cadeaux",v:cfa(r.totals.perteCadeaux),c:"var(--red)"},{l:"CA total",v:cfa(r.totals.totalCA),c:"var(--text)"},{l:"Cadeaux",v:r.totals.nbCadeaux,c:"var(--orange)"}].map(({l,v,c})=>`<div class="prod-cell"><div class="prod-cell-lbl">${l}</div><div class="prod-cell-val" style="color:${c}">${v}</div></div>`).join("")}</div></div>`;
 }
@@ -1722,24 +1722,12 @@ const note=document.getElementById("avance-note").value.trim();
 if(!date||!montant)return alert("Date et montant obligatoires !");
 const k=push(ref(db,"depenses")).key;
 const mois=date.slice(0,7);
-await set(ref(db,"depenses/"+k),{_key:k,date,mois,cat:"Avance Nour",montant,note:note||"",solde:false});
+await set(ref(db,"depenses/"+k),{_key:k,date,mois,cat:"Avance Nour",montant,note:note||""});
 closeModal("modal-avance-nour");
 document.getElementById("modal-avance-nour")?.remove();
 render();
 }
 window.saveAvanceNour=saveAvanceNour;
-
-async function solderAvancesNour(){
-const avances=getDepenses().filter(d=>d.cat==="Avance Nour"&&!d.solde);
-const total=avances.reduce((a,d)=>a+(+d.montant||0),0);
-if(!confirm("Solder les avances de Nour ?\nTotal: "+cfa(total)+"\nLe compteur repart à 0."))return;
-for(const d of avances){
-  await set(ref(db,"depenses/"+d._key),{...d,solde:true});
-}
-alert("✅ Avances de Nour soldées — "+cfa(total));
-render();
-}
-window.solderAvancesNour=solderAvancesNour;
 
 function addEditDepenseLigne(){
 const c=document.getElementById("med-lignes");
@@ -1796,7 +1784,6 @@ getRetraits().forEach(r=>{if(r.mois)allMonthsWithData.add(r.mois);});
 getRapports().forEach(r=>{if(r.date)allMonthsWithData.add(r.date.slice(0,7));});
 const moisList=Array.from(allMonthsWithData).sort((a,b)=>b.localeCompare(a));
 // Show current month always, others only if they have data
-const currentMonthKey=today().slice(0,7);
 const moisCards=moisList.map(mk=>{
 const depList=getDepensesForMonthAll(mk);
 const dep=depList.length>0?{lignes:depList.map(d=>({cat:d.cat,montant:d.montant})),total:depList.reduce((a,d)=>a+(+d.montant||0),0)}:null;
@@ -1847,19 +1834,17 @@ return`<div class="depense-card"><div style="display:flex;justify-content:space-
 ${depList.length>0?`${depList.sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(d=>`<div class="depense-row" style="align-items:center"><div style="flex:1"><span class="depense-cat">${d.cat}</span>${d.note?`<div style="font-size:10px;color:var(--muted)">${d.note}</div>`:""}<div style="font-size:10px;color:var(--muted)">${d.date||d.mois}</div></div><div style="display:flex;align-items:center;gap:6px"><span class="depense-montant">-${cfa(d.montant)}</span><button onclick="openEditDepenses('${d._key}')" style="background:#3b82f622;border:1px solid #3b82f644;color:var(--blue);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✎</button><button onclick="deleteDepense('${d._key}')" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button></div></div>`).join("")}
 <div class="bilan-total" style="padding-top:8px;padding-bottom:8px;border-bottom:1px solid var(--border)"><span class="bilan-total-label" style="font-size:12px">Total dépenses</span><span style="font-family:monospace;font-weight:800;font-size:14px;color:var(--red)">-${cfa(dep.total)}</span></div>`:`<div style="color:var(--muted);font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)">Aucune dépense ce mois</div>`}
 <div style="margin-top:10px">${retraitsSection}</div>
-${mk===currentMonthKey?`<div style="background:var(--bg);border-radius:10px;padding:10px 12px;margin-top:8px;margin-bottom:8px">
+<div style="background:var(--bg);border-radius:10px;padding:10px 12px;margin-top:8px;margin-bottom:8px">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
 <span style="font-weight:800;font-size:12px">👩 Avances Nour</span>
 <div style="display:flex;gap:6px;align-items:center">
-<span style="font-family:monospace;font-weight:800;font-size:13px;color:var(--red)">${cfa(getDepenses().filter(d=>d.cat==="Avance Nour"&&!d.solde).reduce((a,d)=>a+(+d.montant||0),0))}</span>
+<span style="font-family:monospace;font-weight:800;font-size:13px;color:var(--red)">${cfa(depList.filter(d=>d.cat==="Avance Nour").reduce((a,d)=>a+(+d.montant||0),0))}</span>
 <button class="btn btn-red btn-sm" style="padding:3px 8px;font-size:10px" onclick="openAddAvanceNour('${mk}')">+</button>
-${getDepenses().filter(d=>d.cat==="Avance Nour"&&!d.solde).length>0?`<button class="btn btn-green btn-sm" style="padding:3px 8px;font-size:10px" onclick="solderAvancesNour()">✓ Solder</button>`:""}
 </div>
 </div>
-${getDepenses().filter(d=>d.cat==="Avance Nour"&&!d.solde).length===0?`<div style="font-size:11px;color:var(--muted)">Aucune avance en cours</div>`:""}
-${getDepenses().filter(d=>d.cat==="Avance Nour"&&!d.solde).sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(d=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><div><span style="color:var(--muted)">${d.date}</span>${d.note?` · <span style="color:var(--muted)">${d.note}</span>`:""}</div><div style="display:flex;align-items:center;gap:6px"><span style="font-family:monospace;color:var(--red)">-${cfa(d.montant)}</span><button onclick="deleteDepense('${d._key}')" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button></div></div>`).join("")}
-${getDepenses().filter(d=>d.cat==="Avance Nour"&&d.solde).length>0?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)">Soldées : ${cfa(getDepenses().filter(d=>d.cat==="Avance Nour"&&d.solde).reduce((a,d)=>a+(+d.montant||0),0))}</div>`:""}
-</div>`:""}
+${depList.filter(d=>d.cat==="Avance Nour").length===0?`<div style="font-size:11px;color:var(--muted)">Aucune avance ce mois</div>`:""}
+${depList.filter(d=>d.cat==="Avance Nour").sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(d=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><div><span style="color:var(--muted)">${d.date}</span>${d.note?` · <span style="color:var(--muted)">${d.note}</span>`:""}</div><div style="display:flex;align-items:center;gap:6px"><span style="font-family:monospace;color:var(--red)">-${cfa(d.montant)}</span><button onclick="openEditDepenses('${d._key}')" style="background:#3b82f622;border:1px solid #3b82f644;color:var(--blue);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✎</button><button onclick="deleteDepense('${d._key}')" style="background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button></div></div>`).join("")}
+</div>
 <div style="background:var(--bg);border-radius:9px;padding:10px 12px;margin-top:8px">
 <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;color:var(--muted)">Bénéfice brut</span><span style="font-family:monospace;font-size:12px;color:var(--green)">+${cfa(Math.round(ms.profit))}</span></div>
 ${dep?`<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;color:var(--muted)">Dépenses</span><span style="font-family:monospace;font-size:12px;color:var(--red)">-${cfa(dep.total)}</span></div>`:""}
