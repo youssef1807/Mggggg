@@ -895,7 +895,8 @@ nbVentes:ventes.length,
 
 async function validerRapport(){
 const ventes=currentRapport.ventes;
-if(!ventes.length)return alert("Ajoute au moins une vente !");
+const reappros=currentRapport.reappros||[];
+if(!ventes.length&&!reappros.filter(r=>r.depotKey&&r.qty&&r.productId).length)return alert("Ajoute au moins une vente ou une réappro dépôt !");
 const lignesDepot=ventes.filter(v=>v.type==="depot");
 const lignesVente=ventes.filter(v=>v.type!=="depot");
 // Validation des lignes dépôt
@@ -946,9 +947,19 @@ const p=getP(v.productId);
 await fbSetProduct({...p,stock:p.stock-v.qty});
 await fbAddMove({productId:p.id,productName:p.name,type:"out",qty:v.qty,date:dateStr,note:v.isGift?"Cadeau":"Vente "+v.type});
 }
+// Traiter les réappros stock dépôt
+for(const r of reappros){
+  if(!r.depotKey||!r.qty||!r.productId)continue;
+  const depR=getDepots().find(x=>x._key===r.depotKey);if(!depR)continue;
+  const pR=getP(r.productId);
+  if(pR&&r.qty>pR.stock){alert("Stock insuffisant pour réappro dépôt \""+depR.lieu+"\" (stock: "+pR.stock+")");return;}
+  await set(ref(db,"depots/"+r.depotKey),{...depR,qtyDeposited:(+depR.qtyDeposited||0)+(+r.qty),productId:r.productId,productName:pR?pR.name:depR.productName,prixEstime:+r.prix||+depR.prixEstime||0});
+  if(pR)await fbSetProduct({...pR,stock:pR.stock-r.qty});
+  await fbAddMove({productId:pR?pR.id:r.productId,productName:pR?pR.name:depR.productName,type:"out",qty:r.qty,date:dateStr,note:"Réappro dépôt: "+depR.lieu});
+}
 // Enregistrer le rapport
 const tousVentes=[...ventesF,...lignesDepot.map(v=>{const p=getP(v.productId);return{...v,productName:p.name,costPrice:p.costPrice,profit:0,isGift:false};})];
-await fbAddRapport({date:dateStr,ventes:tousVentes,reappros:reappros.filter(r=>r.depotKey&&r.qty).map(r=>{const d=getDepots().find(x=>x._key===r.depotKey);return{depotKey:r.depotKey,depotNom:d?d.lieu:"?",productName:d?d.productName:"?",qty:+r.qty};}),totals:calcTotals(ventesF),source:"manual"});
+await fbAddRapport({date:dateStr,ventes:tousVentes,reappros:reappros.filter(r=>r.depotKey&&r.qty&&r.productId).map(r=>{const d=getDepots().find(x=>x._key===r.depotKey);const p=getP(r.productId);return{depotKey:r.depotKey,depotNom:d?d.lieu:"?",productId:r.productId,productName:p?p.name:"?",qty:+r.qty,prix:+r.prix||0};}),totals:calcTotals(ventesF),source:"manual"});
 for(const v of ventesF.filter(v=>!v.isGift)){
 await fbAddSale({productId:+v.productId,productName:v.productName,qty:v.qty,salePrice:v.price,costPrice:v.costPrice,type:v.type,date:dateStr,profit:v.profit,isCredit:!!v.isCredit});
 }
