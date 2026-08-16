@@ -415,6 +415,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Syne',
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script>
 window.addEventListener("error", function(e) {
   if (e.message === "Script error." || e.message === "Script error") {
@@ -477,6 +478,21 @@ const getP=id=>getProducts().find(p=>p.id===+id||p._key===String(id));
 function initFirebase(){
 try{
 setSyncStatus("sync");
+firebase.auth().signInAnonymously().then(()=>{
+initFirebaseListeners();
+}).catch((e)=>{
+console.warn("Auth anonyme error:", e.message);
+setSyncStatus("offline");
+fbLoaded=true;
+});
+}catch(e){
+console.warn("Firebase error:", e.message);
+fbLoaded=true;setSyncStatus("offline");
+}
+}
+
+function initFirebaseListeners(){
+try{
 onValue(ref(db,"products"),(snap)=>{
 fbProducts=snap.val()||{};
 // Clean start - no demo data
