@@ -239,6 +239,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Syne',
 <button class="nav-btn" id="nav-stats" onclick="goTab('stats');closeMoreMenu()" style="display:none;min-width:60px"><span class="ico">📈</span><span class="lbl">Stats</span></button>
 <button class="nav-btn" id="nav-depenses" onclick="goTab('depenses');closeMoreMenu()" style="display:none;min-width:60px"><span class="ico">💸</span><span class="lbl">Dépenses</span></button>
 <button class="nav-btn" id="nav-historique" onclick="goTab('historique');closeMoreMenu()" style="min-width:60px"><span class="ico">🗂</span><span class="lbl">Histo</span></button>
+<button class="nav-btn" id="nav-investisseurs" onclick="goTab('investisseurs');closeMoreMenu()" style="display:none;min-width:60px"><span class="ico">🏛️</span><span class="lbl">Emprunts</span></button>
 </div>
 </div>
 </div>
@@ -507,6 +508,9 @@ initDepensesListener();
 initCaisseCreditsListeners();
 initRetraitsListener();
 initCommandesListener();
+initAvancesListener();
+initCommandesClientsListener();
+initInvestisseursListener();
 onValue(ref(db,".info/connected"),(snap)=>{setSyncStatus(snap.val()?"online":"offline");});
 onValue(ref(db,"undo_snapshot"),(snap)=>{
   const btn=document.getElementById("btn-undo");
@@ -549,6 +553,9 @@ const snapshot={
   depenses:fbDepenses||{},
   caisseConfig:fbCaisseConfig||{},
   commandes:fbCommandes||{},
+  avances:fbAvances||{},
+  commandesClients:fbCommandesClients||{},
+  investisseurs:fbInvestisseurs||{},
 };
 await set(ref(db,"undo_snapshot"),snapshot);
 }catch(e){console.warn("Undo snapshot error:",e.message);}
@@ -612,6 +619,9 @@ try{
   await set(ref(db,"depenses"),s.depenses||{});
   await set(ref(db,"caisseConfig"),s.caisseConfig||{});
   await set(ref(db,"commandes"),s.commandes||{});
+  await set(ref(db,"avances"),s.avances||{});
+  await set(ref(db,"commandesClients"),s.commandesClients||{});
+  await set(ref(db,"investisseurs"),s.investisseurs||{});
   // Clear snapshot so button disappears
   await remove(ref(db,"undo_snapshot"));
   closeModal("modal-undo");
@@ -685,6 +695,7 @@ document.getElementById("nav-depots").style.display="flex";
 document.getElementById("nav-depenses").style.display=role==="admin"?"flex":"none";
 document.getElementById("nav-caisse").style.display=role==="admin"?"flex":"none";
 document.getElementById("nav-commandes").style.display=role==="admin"?"flex":"none";
+document.getElementById("nav-investisseurs").style.display=role==="admin"?"flex":"none";
 document.getElementById("nav-credits").style.display="flex";
 document.getElementById("btn-stock").style.display=role==="admin"?"inline-flex":"none";
 document.getElementById("btn-reset").style.display=role==="admin"?"inline-flex":"none";
@@ -1308,13 +1319,15 @@ getDepots().forEach(dep=>{
   });
 });
 const benefDepots=versementsMois.reduce((a,v)=>a+(+v.montant||0)*0.7,0);
+const benefCommandesClients=getCommandesClients().filter(c=>c.status==="livrée"&&c.dateLivraison&&c.dateLivraison.startsWith(key)).reduce((a,c)=>a+(+c.profit||0),0);
 const profitVentes=ms.reduce((a,s)=>a+s.profit,0);
 const versementsMoisCA=versementsMois.reduce((a,v)=>a+(+v.montant||0),0);
 const caVentesEncaissees=ms.reduce((a,s)=>a+s.qty*s.salePrice,0);
 return{
-  profit:profitVentes+benefDepots,
+  profit:profitVentes+benefDepots+benefCommandesClients,
   profitVentes,
   benefDepots,
+  benefCommandesClients,
   ca:caVentesEncaissees+versementsMoisCA,
   caVentes:caVentesEncaissees,
   caDepots:versementsMoisCA,
@@ -1331,7 +1344,10 @@ return{
 
 function monthCardHtml(key,label,isCurrent){
 const m=monthStats(key);const fw=pct(m.benefGros,m.benefDetail);
-return`<div class="month-card"><div class="month-card-head"><span class="month-card-title">${label}</span>${isCurrent?tag("En cours","green"):""}</div><div class="month-benef-row"><div class="benef-block benef-block-gros"><div class="benef-block-lbl" style="color:var(--violet)">⬡ Gros</div><div class="benef-block-val" style="color:var(--violet)">${cfa(m.benefGros)}</div><div class="benef-block-sub" style="color:var(--violet)">${m.unitsGros} unités · ${m.countGros} ventes</div></div><div class="benef-block benef-block-detail"><div class="benef-block-lbl" style="color:var(--blue)">◎ Détail</div><div class="benef-block-val" style="color:var(--blue)">${cfa(m.benefDetail)}</div><div class="benef-block-sub" style="color:var(--blue)">${m.unitsDetail} unités · ${m.countDetail} ventes</div></div></div>${m.benefDepots>0?`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--border);margin-top:4px"><span style="font-size:11px;color:var(--amber)">🏪 Dépôts-vente (70% versements)</span><span style="font-family:monospace;font-size:12px;font-weight:700;color:var(--amber)">+${cfa(Math.round(m.benefDepots))}</span></div>`:""}<div class="benef-total-row"><span class="benef-total-lbl">💰 Bénéfice total du mois</span><span class="benef-total-val">${cfa(Math.round(m.profit))}</span></div>${(m.benefGros>0||m.benefDetail>0)?`<div class="split-bar" style="margin-top:10px"><div class="split-bar-fill" style="width:${fw}%"></div></div><div style="display:flex;justify-content:space-between;margin-top:4px;font-size:9px"><span style="color:var(--violet)">Gros ${fw}%</span><span style="color:var(--blue)">Détail ${100-fw}%</span></div>`:""}</div>`;
+const depMois=getDepensesForMonthAll(key);
+const totalDep=depMois.reduce((a,d)=>a+(+d.montant||0),0);
+const beneficeNet=m.profit-totalDep;
+return`<div class="month-card"><div class="month-card-head"><span class="month-card-title">${label}</span>${isCurrent?tag("En cours","green"):""}</div><div class="month-benef-row"><div class="benef-block benef-block-gros"><div class="benef-block-lbl" style="color:var(--violet)">⬡ Gros</div><div class="benef-block-val" style="color:var(--violet)">${cfa(m.benefGros)}</div><div class="benef-block-sub" style="color:var(--violet)">${m.unitsGros} unités · ${m.countGros} ventes</div></div><div class="benef-block benef-block-detail"><div class="benef-block-lbl" style="color:var(--blue)">◎ Détail</div><div class="benef-block-val" style="color:var(--blue)">${cfa(m.benefDetail)}</div><div class="benef-block-sub" style="color:var(--blue)">${m.unitsDetail} unités · ${m.countDetail} ventes</div></div></div>${m.benefDepots>0?`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--border);margin-top:4px"><span style="font-size:11px;color:var(--amber)">🏪 Dépôts-vente (70% versements)</span><span style="font-family:monospace;font-size:12px;font-weight:700;color:var(--amber)">+${cfa(Math.round(m.benefDepots))}</span></div>`:""}${m.benefCommandesClients>0?`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--border);margin-top:4px"><span style="font-size:11px;color:var(--blue)">👤 Commandes clients (VIP)</span><span style="font-family:monospace;font-size:12px;font-weight:700;color:var(--blue)">+${cfa(Math.round(m.benefCommandesClients))}</span></div>`:""}<div class="benef-total-row"><span class="benef-total-lbl">💰 Bénéfice total du mois</span><span class="benef-total-val">${cfa(Math.round(m.profit))}</span></div>${totalDep>0?`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--border);margin-top:4px"><span style="font-size:11px;color:var(--red)">💸 Dépenses du mois</span><span style="font-family:monospace;font-size:12px;font-weight:700;color:var(--red)">-${cfa(Math.round(totalDep))}</span></div><div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;margin-top:2px;background:var(--bg);border-radius:8px;padding-left:8px;padding-right:8px"><span style="font-size:12px;font-weight:800">✅ Bénéfice net (après dépenses)</span><span style="font-family:monospace;font-weight:800;font-size:13px;color:${beneficeNet>=0?"var(--green)":"var(--red)"}">${beneficeNet>=0?"+":""}${cfa(Math.round(beneficeNet))}</span></div>`:""}${(m.benefGros>0||m.benefDetail>0)?`<div class="split-bar" style="margin-top:10px"><div class="split-bar-fill" style="width:${fw}%"></div></div><div style="display:flex;justify-content:space-between;margin-top:4px;font-size:9px"><span style="color:var(--violet)">Gros ${fw}%</span><span style="color:var(--blue)">Détail ${100-fw}%</span></div>`:""}</div>`;
 }
 
 function calcCapital(){return getProducts().reduce((a,p)=>a+(p.stock*p.costPrice),0);}
@@ -1871,15 +1887,12 @@ if(!isCurrent&&!dep&&ms.profit===0&&!hasRetraits)return"";
 const retraitsSection=ASSOCIES.map(assoc=>{
 const retraitsList=getRetraitsMois(mk,assoc);
 const totalAssoc=retraitsList.reduce((a,r)=>a+(+r.montant||0),0);
-const soldedList=getRetraits().filter(r=>r.assoc===assoc&&r.solde);
-const totalSolde=soldedList.reduce((a,r)=>a+(+r.montant||0),0);
 return`<div style="background:var(--bg);border-radius:10px;padding:10px 12px;margin-bottom:8px">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
 <span style="font-weight:800;font-size:12px">💰 Retraits ${assoc}</span>
 <div style="display:flex;gap:6px;align-items:center">
 <span style="font-family:monospace;font-weight:800;font-size:13px;color:var(--amber)">${cfa(totalAssoc)}</span>
 <button class="btn btn-amber btn-sm" style="padding:3px 8px;font-size:10px" onclick="openAddRetrait('${assoc}')">+</button>
-${totalAssoc>0?`<button class="btn btn-green btn-sm" style="padding:3px 8px;font-size:10px" onclick="solderRetraits('${mk}','${assoc}')">✓ Solder</button>`:""}
 </div>
 </div>
 ${retraitsList.map(r=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">
@@ -1891,7 +1904,6 @@ ${retraitsList.map(r=>`<div style="display:flex;justify-content:space-between;al
 </div>
 </div>`).join("")}
 ${retraitsList.length===0?`<div style="font-size:11px;color:var(--muted)">Aucun retrait ce mois</div>`:""}
-${totalSolde>0?`<div style="font-size:10px;color:var(--muted);margin-top:4px;font-style:italic">Soldé ce mois: ${cfa(totalSolde)}</div>`:""}
 </div>`;
 }).join("");
 
@@ -1962,7 +1974,7 @@ const getRetraits=()=>toArr(fbRetraits);
 const ASSOCIES=["Hadi","Youssef"];
 
 function getRetraitsMois(mk,assoc){
-return getRetraits().filter(r=>r.assoc===assoc&&!r.solde);
+return getRetraits().filter(r=>r.assoc===assoc&&r.mois===mk);
 }
 function getTotalRetraitsMois(mk,assoc){
 return getRetraitsMois(mk,assoc).reduce((a,r)=>a+(+r.montant||0),0);
@@ -2006,18 +2018,6 @@ render();
 }
 window.deleteRetrait=deleteRetrait;
 
-async function solderRetraits(mk,assoc){
-const retraits=getRetraitsMois(mk,assoc);
-const total=retraits.reduce((a,r)=>a+(+r.montant||0),0);
-if(!confirm("Solder les retraits de "+assoc+" ?\nTotal: "+cfa(total)+"\nLe compteur repart à 0."))return;
-for(const r of retraits){
-  await set(ref(db,"retraits/"+r._key),{...r,solde:true});
-}
-alert("✅ Retraits de "+assoc+" soldés — "+cfa(total));
-render();
-}
-window.solderRetraits=solderRetraits;
-
 // ── CAISSE & CREDITS ───────────────────────────────────────────────────────────
 let fbCredits={};
 let fbCaisseConfig={};
@@ -2044,6 +2044,9 @@ getRapports().forEach(r=>{
 getDepots().forEach(d=>{(d.versements||[]).forEach(v=>{totalEntrees+=(+v.montant||0);});});
 // Remboursements crédits
 getCredits().forEach(c=>{(c.remboursements||[]).forEach(r=>{totalEntrees+=(+r.montant||0);});});
+// Versements commandes clients (VIP)
+getCommandesClients().forEach(cc=>{(cc.versements||[]).forEach(v=>{totalEntrees+=(+v.montant||0);});});
+getInvestisseurs().forEach(inv=>{if(!inv.dejaUtilise)totalEntrees+=(+inv.montant||0);inv.remboursements&&inv.remboursements.forEach(r=>{totalSorties+=(+r.montant||0);});});
 // Dépenses
 toArr(fbDepenses).forEach(d=>{
   if(d.cat&&d.montant)totalSorties+=(+d.montant||0);
@@ -2051,6 +2054,10 @@ toArr(fbDepenses).forEach(d=>{
 });
 // Retraits
 getRetraits().forEach(r=>{totalSorties+=(+r.montant||0);});
+// Avances fournisseurs
+getAvances().forEach(a=>{totalSorties+=(+a.montant||0);});
+// Paiements fournisseurs pour commandes clients (VIP)
+getCommandesClients().forEach(cc=>{(cc.paiements||[]).forEach(p=>{totalSorties+=(+p.montant||0);});});
 // Apports manuels
 (toArr(fbCaisseConfig?.apports||{})).forEach(a=>{
   const isRetrait=a.note&&(a.note.startsWith("💰 Retrait")||a.note.startsWith("↩ Annul. retrait")||a.note.startsWith("✎ Ajust. retrait"));
@@ -2242,6 +2249,403 @@ document.body.insertAdjacentHTML("beforeend",html);
 }
 window.openApportCaisse=openApportCaisse;
 
+// ── AVANCES FOURNISSEURS ──────────────────────────────────────────────────────
+let fbAvances={};
+function initAvancesListener(){
+onValue(ref(db,"avances"),(snap)=>{fbAvances=snap.val()||{};if(role&&currentTab==="commandes")render();});
+}
+const getAvances=()=>toArr(fbAvances).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+
+function openAddAvance(){
+const html=`<div class="overlay" id="modal-avance" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">🧾 Nouvelle avance fournisseur</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-avance');document.getElementById('modal-avance').remove()">✕</button></div>
+<div class="sheet-body">
+<div class="field"><label>Fournisseur</label><input type="text" id="av-fournisseur" placeholder="ex: Grossiste ABC"/></div>
+<div class="field"><label>Montant avancé (F CFA)</label><input type="number" id="av-montant" placeholder="ex: 100000" min="0"/></div>
+<div class="field"><label>Date</label><input type="date" id="av-date" value="${today()}"/></div>
+<div class="field"><label>Note (optionnel)</label><input type="text" id="av-note" placeholder="ex: Acompte pour production"/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-avance');document.getElementById('modal-avance').remove()">Annuler</button>
+<button class="btn btn-amber" style="flex:2" onclick="saveAvance()">🧾 Enregistrer → Débiter caisse</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.openAddAvance=openAddAvance;
+
+async function saveAvance(){
+const fournisseur=document.getElementById("av-fournisseur").value.trim();
+const montant=+document.getElementById("av-montant").value;
+const date=document.getElementById("av-date").value;
+const note=document.getElementById("av-note").value.trim();
+if(!montant||montant<=0){alert("Montant invalide");return;}
+const k=push(ref(db,"avances")).key;
+await set(ref(db,"avances/"+k),{_key:k,fournisseur,montant,date,note,status:"en_attente"});
+closeModal("modal-avance");document.getElementById("modal-avance")?.remove();
+render();
+}
+window.saveAvance=saveAvance;
+
+async function clorerAvance(key){
+if(!confirm("Marquer cette avance comme reçue ?\nElle sortira du capital engagé (la marchandise est arrivée)."))return;
+const a=fbAvances[key];if(!a)return;
+await set(ref(db,"avances/"+key),{...a,status:"reçue",dateReception:today()});
+render();
+}
+window.clorerAvance=clorerAvance;
+
+async function deleteAvance(key){
+if(!confirm("Supprimer cette avance ?\nLe montant sera recrédité à la caisse."))return;
+await set(ref(db,"avances/"+key),null);
+render();
+}
+window.deleteAvance=deleteAvance;
+
+function avanceCardHtml(a){
+const isEnAttente=a.status==="en_attente";
+return`<div class="card" style="border-color:${isEnAttente?"#f59e0b55":"#22c55e33"};margin-bottom:10px">
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+<div>
+<div style="font-weight:800;font-size:14px">${a.fournisseur||"Avance fournisseur"}</div>
+<div style="font-size:11px;color:var(--muted);margin-top:2px">${a.date||"—"}${a.dateReception?" · Reçu le "+a.dateReception:""}</div>
+</div>
+${tag(isEnAttente?"🧾 En attente":"✅ Reçue",isEnAttente?"amber":"green")}
+</div>
+<div style="display:flex;justify-content:space-between;padding:6px 0;font-weight:800">
+<span>Montant avancé</span>
+<span style="font-family:monospace;color:var(--amber)">${cfa(a.montant)}</span>
+</div>
+${a.note?`<div style="font-size:11px;color:var(--muted);margin:4px 0 8px;font-style:italic">${a.note}</div>`:""}
+${isEnAttente?`<div style="display:flex;gap:8px;margin-top:4px">
+<button class="btn btn-green" style="flex:3" onclick="clorerAvance('${a._key}')">📦 Marchandise reçue</button>
+<button class="btn btn-red btn-sm" onclick="deleteAvance('${a._key}')">✕</button>
+</div>`:`<button class="btn btn-ghost btn-sm btn-full" onclick="deleteAvance('${a._key}')">✕ Supprimer</button>`}
+</div>`;
+}
+
+// ── COMMANDES CLIENTS (VIP) ──────────────────────────────────────────────────
+let fbCommandesClients={};
+function initCommandesClientsListener(){
+onValue(ref(db,"commandesClients"),(snap)=>{fbCommandesClients=snap.val()||{};if(role&&currentTab==="commandes")render();});
+}
+const getCommandesClients=()=>toArr(fbCommandesClients).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+const ccMontantRecu=(cc)=>(cc.versements||[]).reduce((a,v)=>a+(+v.montant||0),0);
+const ccMontantPaye=(cc)=>(cc.paiements||[]).reduce((a,p)=>a+(+p.montant||0),0);
+
+function openAddCommandeClient(){
+const html=`<div class="overlay" id="modal-cc" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">👤 Nouvelle commande client (VIP)</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-cc');document.getElementById('modal-cc').remove()">✕</button></div>
+<div class="sheet-body">
+<div class="field"><label>Client</label><input type="text" id="cc-client" placeholder="ex: M. Koffi"/></div>
+<div class="field"><label>Montant total convenu (F CFA)</label><input type="number" id="cc-montant" placeholder="ex: 150000" min="0"/></div>
+<div class="field"><label>Date</label><input type="date" id="cc-date" value="${today()}"/></div>
+<div class="field"><label>Note (optionnel)</label><input type="text" id="cc-note" placeholder="ex: VIP goût mangue x10"/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-cc');document.getElementById('modal-cc').remove()">Annuler</button>
+<button class="btn btn-primary" style="flex:2" onclick="saveCommandeClient()">👤 Créer</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.openAddCommandeClient=openAddCommandeClient;
+
+async function saveCommandeClient(){
+const client=document.getElementById("cc-client").value.trim();
+const montantTotal=+document.getElementById("cc-montant").value;
+const date=document.getElementById("cc-date").value;
+const note=document.getElementById("cc-note").value.trim();
+if(!client)return alert("Nom du client obligatoire !");
+if(!montantTotal||montantTotal<=0)return alert("Montant invalide");
+const k=push(ref(db,"commandesClients")).key;
+await set(ref(db,"commandesClients/"+k),{_key:k,client,montantTotal,date,note,versements:[],status:"en_attente"});
+closeModal("modal-cc");document.getElementById("modal-cc")?.remove();
+render();
+}
+window.saveCommandeClient=saveCommandeClient;
+
+function openVersementClient(key){
+const html=`<div class="overlay" id="modal-ccv" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">💵 Versement client</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-ccv');document.getElementById('modal-ccv').remove()">✕</button></div>
+<div class="sheet-body">
+<div class="field"><label>Montant reçu (F CFA)</label><input type="number" id="ccv-montant" placeholder="ex: 50000" min="0"/></div>
+<div class="field"><label>Date</label><input type="date" id="ccv-date" value="${today()}"/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-ccv');document.getElementById('modal-ccv').remove()">Annuler</button>
+<button class="btn btn-green" style="flex:2" onclick="saveVersementClient('${key}')">💵 Encaisser → Caisse</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.openVersementClient=openVersementClient;
+
+async function saveVersementClient(key){
+const cc=fbCommandesClients[key];if(!cc)return;
+const montant=+document.getElementById("ccv-montant").value;
+const date=document.getElementById("ccv-date").value;
+if(!montant||montant<=0)return alert("Montant invalide");
+const versements=[...(cc.versements||[]),{montant,date}];
+await set(ref(db,"commandesClients/"+key),{...cc,versements});
+closeModal("modal-ccv");document.getElementById("modal-ccv")?.remove();
+render();
+}
+window.saveVersementClient=saveVersementClient;
+
+function openPaiementFournisseurClient(key){
+const html=`<div class="overlay" id="modal-ccp" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">💸 Paiement au fournisseur</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-ccp');document.getElementById('modal-ccp').remove()">✕</button></div>
+<div class="sheet-body">
+<div style="font-size:11px;color:var(--muted);margin-bottom:10px">Argent que tu donnes au fournisseur pour cette commande — débite la caisse.</div>
+<div class="field"><label>Montant payé (F CFA)</label><input type="number" id="ccp-montant" placeholder="ex: 50000" min="0"/></div>
+<div class="field"><label>Date</label><input type="date" id="ccp-date" value="${today()}"/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-ccp');document.getElementById('modal-ccp').remove()">Annuler</button>
+<button class="btn btn-amber" style="flex:2" onclick="savePaiementFournisseurClient('${key}')">💸 Payer → Débiter caisse</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.openPaiementFournisseurClient=openPaiementFournisseurClient;
+
+async function savePaiementFournisseurClient(key){
+const cc=fbCommandesClients[key];if(!cc)return;
+const montant=+document.getElementById("ccp-montant").value;
+const date=document.getElementById("ccp-date").value;
+if(!montant||montant<=0)return alert("Montant invalide");
+const paiements=[...(cc.paiements||[]),{montant,date}];
+await set(ref(db,"commandesClients/"+key),{...cc,paiements});
+closeModal("modal-ccp");document.getElementById("modal-ccp")?.remove();
+render();
+}
+window.savePaiementFournisseurClient=savePaiementFournisseurClient;
+
+async function livrerCommandeClient(key){
+const cc=fbCommandesClients[key];if(!cc)return;
+const dejaPaye=ccMontantPaye(cc);
+const coutStr=prompt("Coût total réel payé au fournisseur pour cette commande (F CFA) ?\nDéjà payé jusqu'ici: "+cfa(dejaPaye)+"\nConfirme ou ajuste ce montant.",dejaPaye);
+if(coutStr===null)return;
+const coutRevient=+coutStr;
+if(isNaN(coutRevient)||coutRevient<0)return alert("Coût invalide");
+const profit=(+cc.montantTotal||0)-coutRevient;
+if(!confirm(`Livrer à ${cc.client} ?\nBénéfice calculé: ${cfa(profit)}\n(${cfa(cc.montantTotal)} − ${cfa(coutRevient)})`))return;
+await set(ref(db,"commandesClients/"+key),{...cc,status:"livrée",coutRevient,profit,dateLivraison:today()});
+render();
+}
+window.livrerCommandeClient=livrerCommandeClient;
+
+async function deleteCommandeClient(key){
+if(!confirm("Supprimer cette commande client ?\nLes versements déjà encaissés seront retirés du calcul de caisse."))return;
+await set(ref(db,"commandesClients/"+key),null);
+render();
+}
+window.deleteCommandeClient=deleteCommandeClient;
+
+function commandeClientCardHtml(cc){
+const isEnAttente=cc.status==="en_attente";
+const recu=ccMontantRecu(cc);
+const paye=ccMontantPaye(cc);
+const solde=recu-paye;
+return`<div class="card" style="border-color:${isEnAttente?"#3b82f655":"#22c55e33"};margin-bottom:10px">
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+<div>
+<div style="font-weight:800;font-size:14px">${cc.client}</div>
+<div style="font-size:11px;color:var(--muted);margin-top:2px">${cc.date||"—"}${cc.dateLivraison?" · Livré le "+cc.dateLivraison:""}</div>
+</div>
+${tag(isEnAttente?"⏳ En attente":"✅ Livrée",isEnAttente?"blue":"green")}
+</div>
+<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px">
+<span style="color:var(--muted)">Montant convenu</span>
+<span style="font-family:monospace;font-weight:700">${cfa(cc.montantTotal)}</span>
+</div>
+<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px">
+<span style="color:var(--muted)">💵 Reçu du client</span>
+<span style="font-family:monospace;font-weight:700;color:var(--green)">${cfa(recu)}</span>
+</div>
+<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px">
+<span style="color:var(--muted)">💸 Payé au fournisseur</span>
+<span style="font-family:monospace;font-weight:700;color:var(--amber)">${cfa(paye)}</span>
+</div>
+${isEnAttente&&solde!==0?`<div style="display:flex;justify-content:space-between;padding:6px 0;margin-top:4px;border-top:1px solid var(--border);font-size:12px;font-weight:700">
+<span style="color:var(--muted)">${solde>0?"Tu détiens (dû au client)":"Le client te doit"}</span>
+<span style="font-family:monospace;color:${solde>0?"var(--red)":"var(--blue)"}">${cfa(Math.abs(solde))}</span>
+</div>`:""}
+${!isEnAttente?`<div style="display:flex;justify-content:space-between;padding:6px 0;margin-top:4px;border-top:1px solid var(--border);font-weight:800">
+<span>Bénéfice réalisé</span>
+<span style="font-family:monospace;color:${cc.profit>=0?"var(--green)":"var(--red)"}">${cc.profit>=0?"+":""}${cfa(cc.profit)}</span>
+</div>`:""}
+${cc.note?`<div style="font-size:11px;color:var(--muted);margin:6px 0;font-style:italic">${cc.note}</div>`:""}
+${isEnAttente?`<div style="display:flex;gap:6px;margin-top:6px">
+<button class="btn btn-primary btn-sm" style="flex:1" onclick="openVersementClient('${cc._key}')">💵 Verser</button>
+<button class="btn btn-amber btn-sm" style="flex:1" onclick="openPaiementFournisseurClient('${cc._key}')">💸 Payer four.</button>
+<button class="btn btn-green btn-sm" style="flex:1" onclick="livrerCommandeClient('${cc._key}')">📦 Livrer</button>
+<button class="btn btn-red btn-sm" onclick="deleteCommandeClient('${cc._key}')">✕</button>
+</div>`:`<button class="btn btn-ghost btn-sm btn-full" onclick="deleteCommandeClient('${cc._key}')">✕ Supprimer</button>`}
+</div>`;
+}
+
+// ── INVESTISSEURS / EMPRUNTS (capital externe emprunté) ──────────────────────
+let fbInvestisseurs={};
+function initInvestisseursListener(){
+onValue(ref(db,"investisseurs"),(snap)=>{fbInvestisseurs=snap.val()||{};if(role&&currentTab==="investisseurs")render();});
+}
+const getInvestisseurs=()=>toArr(fbInvestisseurs).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+const invRembourse=(inv)=>(inv.remboursements||[]).reduce((a,r)=>a+(+r.montant||0),0);
+const invSoldeDu=(inv)=>Math.max(0,(+inv.montant||0)-invRembourse(inv));
+
+function openAddInvestisseur(){
+const html=`<div class="overlay" id="modal-inv" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">🏛️ Nouvel apport emprunté</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-inv');document.getElementById('modal-inv').remove()">✕</button></div>
+<div class="sheet-body">
+<div style="font-size:11px;color:var(--muted);margin-bottom:10px">Argent que quelqu'un t'a avancé pour le business — reste son argent, pas ton bénéfice.</div>
+<div class="field"><label>Nom (prêteur / investisseur)</label><input type="text" id="inv-nom" placeholder="ex: M. Diallo"/></div>
+<div class="field"><label>Montant apporté (F CFA)</label><input type="number" id="inv-montant" placeholder="ex: 200000" min="0"/></div>
+<div class="field"><label>Date</label><input type="date" id="inv-date" value="${today()}"/></div>
+<div class="field"><label>Note (optionnel)</label><input type="text" id="inv-note" placeholder="ex: Apport pour stock initial"/></div>
+<div class="field" style="display:flex;align-items:center;gap:8px;margin-top:4px">
+<input type="checkbox" id="inv-deja-utilise" style="width:18px;height:18px"/>
+<label for="inv-deja-utilise" style="font-size:12px;margin:0">Cet argent est déjà dépensé (stock déjà acheté) — ne pas l'ajouter à la caisse actuelle</label>
+</div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-inv');document.getElementById('modal-inv').remove()">Annuler</button>
+<button class="btn btn-primary" style="flex:2" onclick="saveInvestisseur()">🏛️ Enregistrer</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.openAddInvestisseur=openAddInvestisseur;
+
+async function saveInvestisseur(){
+const nom=document.getElementById("inv-nom").value.trim();
+const montant=+document.getElementById("inv-montant").value;
+const date=document.getElementById("inv-date").value;
+const note=document.getElementById("inv-note").value.trim();
+const dejaUtilise=document.getElementById("inv-deja-utilise").checked;
+if(!nom)return alert("Nom obligatoire !");
+if(!montant||montant<=0)return alert("Montant invalide");
+const k=push(ref(db,"investisseurs")).key;
+await set(ref(db,"investisseurs/"+k),{_key:k,nom,montant,date,note,dejaUtilise,remboursements:[]});
+closeModal("modal-inv");document.getElementById("modal-inv")?.remove();
+render();
+}
+window.saveInvestisseur=saveInvestisseur;
+
+function openRemboursementInvestisseur(key){
+const html=`<div class="overlay" id="modal-invr" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">💸 Remboursement</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-invr');document.getElementById('modal-invr').remove()">✕</button></div>
+<div class="sheet-body">
+<div class="field"><label>Montant remboursé (F CFA)</label><input type="number" id="invr-montant" placeholder="ex: 50000" min="0"/></div>
+<div class="field"><label>Date</label><input type="date" id="invr-date" value="${today()}"/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-invr');document.getElementById('modal-invr').remove()">Annuler</button>
+<button class="btn btn-amber" style="flex:2" onclick="saveRemboursementInvestisseur('${key}')">💸 Rembourser → Débiter caisse</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.openRemboursementInvestisseur=openRemboursementInvestisseur;
+
+async function saveRemboursementInvestisseur(key){
+const inv=fbInvestisseurs[key];if(!inv)return;
+const montant=+document.getElementById("invr-montant").value;
+const date=document.getElementById("invr-date").value;
+if(!montant||montant<=0)return alert("Montant invalide");
+const remboursements=[...(inv.remboursements||[]),{montant,date}];
+await set(ref(db,"investisseurs/"+key),{...inv,remboursements});
+closeModal("modal-invr");document.getElementById("modal-invr")?.remove();
+render();
+}
+window.saveRemboursementInvestisseur=saveRemboursementInvestisseur;
+
+async function deleteInvestisseur(key){
+if(!confirm("Supprimer cet emprunt ?\nLe montant sera retiré du calcul de caisse."))return;
+await set(ref(db,"investisseurs/"+key),null);
+render();
+}
+window.deleteInvestisseur=deleteInvestisseur;
+
+function investisseurCardHtml(inv){
+const rembourse=invRembourse(inv);
+const solde=invSoldeDu(inv);
+const isSolde=solde<=0;
+return`<div class="card" style="border-color:${isSolde?"#22c55e33":"#a78bfa55"};margin-bottom:10px">
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+<div>
+<div style="font-weight:800;font-size:14px">${inv.nom}</div>
+<div style="font-size:11px;color:var(--muted);margin-top:2px">${inv.date||"—"}</div>
+</div>
+${tag(isSolde?"✅ Soldé":"🏛️ En cours",isSolde?"green":"violet")}
+</div>
+${inv.dejaUtilise?`<div style="font-size:10px;color:var(--muted);margin-bottom:6px;font-style:italic">📦 Déjà transformé en stock — n'affecte pas la caisse</div>`:""}
+<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px">
+<span style="color:var(--muted)">Apporté</span>
+<span style="font-family:monospace;font-weight:700">${cfa(inv.montant)}</span>
+</div>
+<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px">
+<span style="color:var(--muted)">Remboursé</span>
+<span style="font-family:monospace;font-weight:700;color:var(--green)">${cfa(rembourse)}</span>
+</div>
+<div style="display:flex;justify-content:space-between;padding:6px 0;margin-top:4px;border-top:1px solid var(--border);font-weight:800">
+<span>Reste dû</span>
+<span style="font-family:monospace;color:${isSolde?"var(--green)":"var(--violet)"}">${cfa(solde)}</span>
+</div>
+${inv.note?`<div style="font-size:11px;color:var(--muted);margin:6px 0;font-style:italic">${inv.note}</div>`:""}
+<div style="display:flex;gap:8px;margin-top:6px">
+${!isSolde?`<button class="btn btn-amber" style="flex:3" onclick="openRemboursementInvestisseur('${inv._key}')">💸 Rembourser</button>`:""}
+<button class="btn btn-red btn-sm" onclick="deleteInvestisseur('${inv._key}')">✕</button>
+</div>
+</div>`;
+}
+
+function renderInvestisseurs(){
+const el=document.getElementById("content");if(!el)return;
+const invs=getInvestisseurs();
+const enCours=invs.filter(i=>!(invSoldeDu(i)<=0));
+const soldes=invs.filter(i=>invSoldeDu(i)<=0);
+const totalDu=enCours.reduce((a,i)=>a+invSoldeDu(i),0);
+
+el.innerHTML=`
+<div class="sec-head"><span class="sec-title">🏛️ Argent emprunté</span>
+<button class="btn btn-primary btn-sm" onclick="openAddInvestisseur()">+ Nouvel apport</button>
+</div>
+<div style="font-size:11px;color:var(--muted);margin:-6px 0 12px">Capital que quelqu'un t'a avancé — utilisé dans le business, mais pas ton bénéfice. À part de ton capital propre.</div>
+
+${enCours.length?`<div style="background:#a78bfa14;border:1px solid #a78bfa33;border-radius:12px;padding:12px 14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center">
+<span style="font-size:12px;font-weight:700;color:var(--muted)">🏛️ Total encore dû</span>
+<span style="font-family:monospace;font-weight:800;font-size:16px;color:var(--violet)">${cfa(totalDu)}</span>
+</div>`:""}
+
+${enCours.length===0&&soldes.length===0?`<div class="empty">Aucun emprunt enregistré.</div>`:""}
+
+${enCours.length?`<div style="font-size:10px;font-weight:700;color:var(--violet);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🏛️ En cours (${enCours.length})</div>
+${enCours.map(investisseurCardHtml).join("")}`:""}
+
+${soldes.length?`<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:12px 0 8px">✅ Soldés (${soldes.length})</div>
+${soldes.map(investisseurCardHtml).join("")}`:""}`;
+}
+
 // ── COMMANDES ──────────────────────────────────────────────────────────────────
 let fbCommandes={};
 function initCommandesListener(){
@@ -2255,6 +2659,13 @@ const commandes=getCommandes();
 const enAttente=commandes.filter(c=>c.status==="en_attente");
 const recues=commandes.filter(c=>c.status==="reçue");
 const totalEnAttente=enAttente.reduce((a,c)=>a+(+c.totalMontant||0),0);
+const avances=getAvances();
+const avEnAttente=avances.filter(a=>a.status==="en_attente");
+const avRecues=avances.filter(a=>a.status==="reçue");
+const totalAvEnAttente=avEnAttente.reduce((a,x)=>a+(+x.montant||0),0);
+const commandesClients=getCommandesClients();
+const ccEnAttente=commandesClients.filter(c=>c.status==="en_attente");
+const ccLivrees=commandesClients.filter(c=>c.status==="livrée");
 
 el.innerHTML=`
 <div class="sec-head"><span class="sec-title">📬 Commandes</span>
@@ -2272,7 +2683,38 @@ ${enAttente.length?`<div style="font-size:10px;font-weight:700;color:var(--amber
 ${enAttente.map(commandeCardHtml).join("")}`:""}
 
 ${recues.length?`<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:12px 0 8px">✅ Reçues (${recues.length})</div>
-${recues.map(commandeCardHtml).join("")}`:""}`;
+${recues.map(commandeCardHtml).join("")}`:""}
+
+<div class="sec-head" style="margin-top:20px"><span class="sec-title">🧾 Avances fournisseurs</span>
+<button class="btn btn-amber btn-sm" onclick="openAddAvance()">+ Nouvelle</button>
+</div>
+<div style="font-size:11px;color:var(--muted);margin:-6px 0 12px">Acompte versé avant réception — reste dans le capital, pas une dépense.</div>
+
+${avEnAttente.length?`<div style="background:#f59e0b14;border:1px solid #f59e0b33;border-radius:12px;padding:12px 14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center">
+<span style="font-size:12px;font-weight:700;color:var(--muted)">🧾 Avances en attente</span>
+<span style="font-family:monospace;font-weight:800;font-size:16px;color:var(--amber)">${cfa(totalAvEnAttente)}</span>
+</div>`:""}
+
+${avEnAttente.length===0&&avRecues.length===0?`<div class="empty">Aucune avance fournisseur.</div>`:""}
+
+${avEnAttente.length?`<div style="font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🟡 En attente (${avEnAttente.length})</div>
+${avEnAttente.map(avanceCardHtml).join("")}`:""}
+
+${avRecues.length?`<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:12px 0 8px">✅ Reçues (${avRecues.length})</div>
+${avRecues.map(avanceCardHtml).join("")}`:""}
+
+<div class="sec-head" style="margin-top:20px"><span class="sec-title">👤 Commandes clients (VIP)</span>
+<button class="btn btn-primary btn-sm" onclick="openAddCommandeClient()">+ Nouvelle</button>
+</div>
+<div style="font-size:11px;color:var(--muted);margin:-6px 0 12px">Le client avance l'argent pour sa commande — pas ton capital, pas encore un bénéfice.</div>
+
+${ccEnAttente.length===0&&ccLivrees.length===0?`<div class="empty">Aucune commande client.</div>`:""}
+
+${ccEnAttente.length?`<div style="font-size:10px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🔵 En attente (${ccEnAttente.length})</div>
+${ccEnAttente.map(commandeClientCardHtml).join("")}`:""}
+
+${ccLivrees.length?`<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:12px 0 8px">✅ Livrées (${ccLivrees.length})</div>
+${ccLivrees.map(commandeClientCardHtml).join("")}`:""}`;
 }
 
 function commandeCardHtml(c){
@@ -3073,7 +3515,7 @@ render();
 }
 window.saveEditRetrait=saveEditRetrait;
 
-function showCapitalMobilise(stock,caisse,depots,credits,commandes,total){
+function showCapitalMobilise(stock,caisse,depots,credits,commandes,avances,netClients,detteInvestisseurs,total){
 const html=`<div class="overlay" id="modal-capital" style="display:flex">
 <div class="sheet">
 <div class="sheet-handle"></div>
@@ -3100,6 +3542,18 @@ const html=`<div class="overlay" id="modal-capital" style="display:flex">
 <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
 <div><span style="font-size:13px">📬 Commandes en attente</span><div style="font-size:10px;color:var(--muted)">Argent engagé non reçu</div></div>
 <span style="font-family:monospace;font-weight:700;color:var(--red)">${cfa(Math.round(commandes))}</span>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
+<div><span style="font-size:13px">🧾 Avances fournisseurs</span><div style="font-size:10px;color:var(--muted)">Acomptes versés, marchandise pas encore reçue</div></div>
+<span style="font-family:monospace;font-weight:700;color:var(--amber)">${cfa(Math.round(avances))}</span>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
+<div><span style="font-size:13px">👤 Commandes clients (net)</span><div style="font-size:10px;color:var(--muted)">${netClients>=0?"Toi as avancé plus que reçu (le client te doit)":"Reçu plus que payé au fournisseur (dû au client)"}</div></div>
+<span style="font-family:monospace;font-weight:700;color:${netClients>=0?"var(--blue)":"var(--red)"}">${netClients>=0?"+":"−"}${cfa(Math.abs(Math.round(netClients)))}</span>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
+<div><span style="font-size:13px">🏛️ Argent emprunté</span><div style="font-size:10px;color:var(--muted)">Capital externe encore dû, pas ton bénéfice</div></div>
+<span style="font-family:monospace;font-weight:700;color:var(--red)">−${cfa(Math.round(detteInvestisseurs))}</span>
 </div>
 <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0 4px;border-top:2px solid var(--border);margin-top:4px">
 <span style="font-size:14px;font-weight:800">= Capital total mobilisé</span>
@@ -3200,6 +3654,7 @@ if(currentTab==="depenses"){renderDepenses();return;}
 if(currentTab==="caisse"){renderCaisse();return;}
 if(currentTab==="credits"){renderCredits();return;}
 if(currentTab==="commandes"){renderCommandes();return;}
+if(currentTab==="investisseurs"){renderInvestisseurs();return;}
 const el=document.getElementById("content");
 const mk=nowMK();const d=new Date();
 const currentLabel=`${MONTHS_FULL[d.getMonth()]} ${d.getFullYear()}`;
@@ -3209,7 +3664,7 @@ if(currentTab==="dashboard"){
 const m=monthStats(mk),low=getProducts().filter(p=>p.stock<=5);
 const totalB=getSales().reduce((a,s)=>a+s.profit,0)+getDepots().reduce((a,d)=>{
   return a+(d.versements||[]).reduce((b,v)=>b+(+v.montant||0)*0.7,0);
-},0);
+},0)+getCommandesClients().filter(c=>c.status==="livrée").reduce((a,c)=>a+(+c.profit||0),0);
 const capital=calcCapital();
 const capitalEngage=getCommandes().filter(c=>c.status==="en_attente").reduce((a,c)=>a+(+c.totalMontant||0),0);
 // Capital mobilisé = stock + caisse + dépôts (moitié prix) + crédits + commandes en attente
@@ -3220,8 +3675,12 @@ let _te=0,_ts=0;
 getRapports().forEach(r=>{if(!r.totals||r.source==="zero")return;const vc=(r.ventes||[]).filter(v=>v.isCredit&&!v.isGift);const cc=vc.reduce((a,v)=>a+(v.price||0)*(v.qty||0),0);const cr=r.totals.totalCA-cc;if(cr>0)_te+=cr;});
 getDepots().forEach(d=>{(d.versements||[]).forEach(v=>{_te+=(+v.montant||0);});});
 getCredits().forEach(c=>{(c.remboursements||[]).forEach(r=>{_te+=(+r.montant||0);});});
+getCommandesClients().forEach(cc=>{(cc.versements||[]).forEach(v=>{_te+=(+v.montant||0);});});
+getInvestisseurs().forEach(inv=>{if(!inv.dejaUtilise)_te+=(+inv.montant||0);inv.remboursements&&inv.remboursements.forEach(r=>{_ts+=(+r.montant||0);});});
 toArr(fbDepenses).forEach(d=>{if(d.cat&&d.montant)_ts+=(+d.montant||0);else if(d.lignes)(d.lignes||[]).forEach(l=>{if(l.montant)_ts+=(+l.montant||0);});});
 getRetraits().forEach(r=>{_ts+=(+r.montant||0);});
+getAvances().forEach(a=>{_ts+=(+a.montant||0);});
+getCommandesClients().forEach(cc=>{(cc.paiements||[]).forEach(p=>{_ts+=(+p.montant||0);});});
 (toArr(fbCaisseConfig?.apports||{})).forEach(a=>{const skip=a.note&&(a.note.startsWith("💰 Retrait")||a.note.startsWith("↩ Annul. retrait")||a.note.startsWith("✎ Ajust. retrait"));if(skip)return;if(+a.montant>0)_te+=(+a.montant||0);else _ts+=Math.abs(+a.montant||0);});
 const caisseActuelle=_sd+_te-_ts;
 const capitalDepots=getDepots().filter(d=>d.status==="open").reduce((a,d)=>{
@@ -3231,7 +3690,10 @@ const capitalDepots=getDepots().filter(d=>d.status==="open").reduce((a,d)=>{
 },0);
 const capitalCredits=getCredits().filter(c=>c.status!=="soldé").reduce((a,c)=>a+(+c.montantRestant||0),0);
 const capitalCommandes=capitalEngage;
-const capitalMobilise=capitalStock+caisseActuelle+capitalDepots+capitalCredits+capitalCommandes;
+const capitalAvances=getAvances().filter(a=>a.status==="en_attente").reduce((a,x)=>a+(+x.montant||0),0);
+const capitalNetClients=getCommandesClients().filter(c=>c.status==="en_attente").reduce((a,c)=>a+(ccMontantPaye(c)-ccMontantRecu(c)),0);
+const capitalDetteInvestisseurs=getInvestisseurs().reduce((a,inv)=>a+invSoldeDu(inv),0);
+const capitalMobilise=capitalStock+caisseActuelle+capitalDepots+capitalCredits+capitalCommandes+capitalAvances+capitalNetClients-capitalDetteInvestisseurs;
 const depListDash=getDepensesForMonthAll(mk);
 const depMoisDash=depListDash.length>0?{total:depListDash.reduce((a,d)=>a+(+d.montant||0),0)}:null;
 const retraitsMoisDash=getTotalRetraitsAllMois(mk);
@@ -3241,7 +3703,7 @@ const beneficeReelDash=m.profit-(depMoisDash?.total||0);
 const beneficeApresRetraitsDash=beneficeReelDash-retraitsMoisDash;
 const cd=Array.from({length:6},(_,i)=>{const dd=new Date(d.getFullYear(),d.getMonth()-5+i,1);const k=`${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,"0")}`;return{lbl:MONTHS[dd.getMonth()],v:monthStats(k).profit};});
 const bmax=Math.max(...cd.map(x=>x.v),1);
-el.innerHTML=`${monthCardHtml(mk,currentLabel,true)}<div class="grid2" style="margin-bottom:12px"><div class="stat-box" onclick="showBenefDetail(${m.profit},${depMoisDash?.total||0},${retraitsHadiDash},${retraitsYoussefDash},${beneficeApresRetraitsDash})" style="cursor:pointer;border-color:#22c55e44"><div class="stat-label">Bénéf. net réel (mois) 👆</div><div class="stat-val" style="color:${beneficeReelDash>=0?"var(--green)":"var(--red)"};font-size:14px">${beneficeReelDash>=0?"+":""}${cfa(Math.round(beneficeReelDash))}</div><div class="stat-sub">${depMoisDash?"Dép: -"+cfa(depMoisDash.total):"⚠️ sans dépenses"}</div>${retraitsMoisDash>0?`<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Après retraits (-${cfa(retraitsMoisDash)})</div><div style="font-family:monospace;font-weight:800;font-size:13px;color:${beneficeApresRetraitsDash>=0?"var(--green)":"var(--red)"}">${beneficeApresRetraitsDash>=0?"+":""}${cfa(Math.round(beneficeApresRetraitsDash))}</div></div>`:""}</div><div class="stat-box"><div class="stat-label">CA ce mois</div><div class="stat-val" style="color:var(--blue);font-size:14px">${cfa(m.ca)}</div></div><div class="stat-box" onclick="showCapitalMobilise(${capitalStock},${caisseActuelle},${capitalDepots},${capitalCredits},${capitalCommandes},${capitalMobilise})" style="cursor:pointer;border-color:#a78bfa44"><div class="stat-label">💼 Capital mobilisé 👆</div><div class="stat-val" style="color:var(--violet);font-size:13px">${cfa(Math.round(capitalMobilise))}</div><div class="stat-sub">Stock+Caisse+Dépôts+Crédits+Cdes</div></div>
+el.innerHTML=`${monthCardHtml(mk,currentLabel,true)}<div class="grid2" style="margin-bottom:12px"><div class="stat-box" onclick="showBenefDetail(${m.profit},${depMoisDash?.total||0},${retraitsHadiDash},${retraitsYoussefDash},${beneficeApresRetraitsDash})" style="cursor:pointer;border-color:#22c55e44"><div class="stat-label">Bénéf. net réel (mois) 👆</div><div class="stat-val" style="color:${beneficeReelDash>=0?"var(--green)":"var(--red)"};font-size:14px">${beneficeReelDash>=0?"+":""}${cfa(Math.round(beneficeReelDash))}</div><div class="stat-sub">${depMoisDash?"Dép: -"+cfa(depMoisDash.total):"⚠️ sans dépenses"}</div>${retraitsMoisDash>0?`<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Après retraits (-${cfa(retraitsMoisDash)})</div><div style="font-family:monospace;font-weight:800;font-size:13px;color:${beneficeApresRetraitsDash>=0?"var(--green)":"var(--red)"}">${beneficeApresRetraitsDash>=0?"+":""}${cfa(Math.round(beneficeApresRetraitsDash))}</div></div>`:""}</div><div class="stat-box"><div class="stat-label">CA ce mois</div><div class="stat-val" style="color:var(--blue);font-size:14px">${cfa(m.ca)}</div></div><div class="stat-box" onclick="showCapitalMobilise(${capitalStock},${caisseActuelle},${capitalDepots},${capitalCredits},${capitalCommandes},${capitalAvances},${capitalNetClients},${capitalDetteInvestisseurs},${capitalMobilise})" style="cursor:pointer;border-color:#a78bfa44"><div class="stat-label">💼 Capital mobilisé 👆</div><div class="stat-val" style="color:var(--violet);font-size:13px">${cfa(Math.round(capitalMobilise))}</div><div class="stat-sub">Stock+Caisse+Dépôts+Crédits+Cdes+Avances±Clients−Emprunts</div></div>
 ${capitalEngage>0?`<div class="stat-box" style="border-color:#f59e0b44"><div class="stat-label">💸 Engagé commandes</div><div class="stat-val" style="color:var(--amber);font-size:13px">${cfa(capitalEngage)}</div><div class="stat-sub">${getCommandes().filter(c=>c.status==="en_attente").length} commande(s) en attente</div></div>`:""}<div class="stat-box"><div class="stat-label">Bénéf. brut total</div><div class="stat-val" style="color:var(--green);font-size:13px">${cfa(totalB)}</div></div></div><div class="card"><div style="font-weight:800;font-size:13px;margin-bottom:12px">📈 Bénéfices 6 mois</div><div class="bar-chart">${cd.map((x,i)=>{const h=x.v?Math.round((x.v/bmax)*60):2;return`<div class="bar-col"><div class="bar" style="height:${h}px;background:hsl(${210-i*8},60%,${38+(x.v/bmax)*22}%)"></div><span class="bar-lbl">${x.lbl}</span></div>`;}).join("")}</div></div>${retraitsMoisDash>0?`<div class="card" style="margin-bottom:12px"><div style="font-weight:800;font-size:13px;margin-bottom:10px">💰 Retraits du mois</div>
 <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><span style="font-size:13px">Hadi</span><span style="font-family:monospace;color:var(--amber);font-weight:700">-${cfa(retraitsHadiDash)}</span></div>
 <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><span style="font-size:13px">Youssef</span><span style="font-family:monospace;color:var(--amber);font-weight:700">-${cfa(retraitsYoussefDash)}</span></div>
