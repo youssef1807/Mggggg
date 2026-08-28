@@ -2138,6 +2138,26 @@ getRetraits().forEach(r=>{
   const isManual=!a.note||(!a.note.startsWith("📬")&&!a.note.startsWith("🚚")&&!a.note.startsWith("✎")&&!a.note.startsWith("❌")&&!a.note.startsWith("↩"));
   addEntry(a.date,(a.montant>0?"💵 Apport: ":"📤 Sortie: ")+(a.note||"Manuel"),+a.montant,isManual?"apport_manual":"apport",a._key);
 });
+// Avances fournisseurs
+getAvances().forEach(a=>{
+  addEntry(a.date,"🧾 Avance fournisseur: "+(a.fournisseur||"?"),-a.montant,"avance");
+});
+// Commandes clients (VIP): versements du client (entrée) + paiements au fournisseur (sortie)
+getCommandesClients().forEach(cc=>{
+  (cc.versements||[]).forEach(v=>{
+    addEntry(v.date,"👤 Versement client: "+cc.client,+v.montant,"cc_versement");
+  });
+  (cc.paiements||[]).forEach(p=>{
+    addEntry(p.date,"👤 Paiement fournisseur (pour "+cc.client+")",-p.montant,"cc_paiement");
+  });
+});
+// Investisseurs: apports (entrée, sauf si déjà dépensé) + remboursements (sortie)
+getInvestisseurs().forEach(inv=>{
+  if(!inv.dejaUtilise)addEntry(inv.date,"🏛️ Apport emprunté: "+inv.nom,+inv.montant,"inv_apport");
+  (inv.remboursements||[]).forEach(r=>{
+    addEntry(r.date,"🏛️ Remboursement: "+inv.nom,-r.montant,"inv_remb");
+  });
+});
 
 const sortedDates=Object.keys(allDays).sort((a,b)=>b.localeCompare(a));
 
