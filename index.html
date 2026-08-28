@@ -2310,13 +2310,94 @@ render();
 }
 window.saveAvance=saveAvance;
 
-async function clorerAvance(key){
-if(!confirm("Marquer cette avance comme reçue ?\nElle sortira du capital engagé (la marchandise est arrivée)."))return;
+function clorerAvance(key){
 const a=fbAvances[key];if(!a)return;
-await set(ref(db,"avances/"+key),{...a,status:"reçue",dateReception:today()});
-render();
+const html=`<div class="overlay" id="modal-avance-reception" style="display:flex">
+<div class="sheet" style="max-height:95dvh">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">📦 Marchandise reçue: ${a.fournisseur||"Fournisseur"}</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-avance-reception');document.getElementById('modal-avance-reception').remove()">✕</button></div>
+<div class="sheet-body">
+<div style="background:#f59e0b14;border:1px solid #f59e0b33;border-radius:9px;padding:10px 12px;font-size:11px;color:var(--amber);margin-bottom:10px">
+💡 Détaille les produits reçus pour ${cfa(a.montant)} — ils s'ajoutent au stock au prix de revient indiqué. L'avance a déjà été débitée de la caisse, rien ne sera redébité.
+</div>
+<div id="cmd-lignes" style="display:flex;flex-direction:column;gap:10px"></div>
+<button class="btn btn-ghost btn-sm btn-full" onclick="addCmdLigne()" style="margin-top:6px">+ Ajouter un produit</button>
+<div class="field" style="margin-top:10px"><label>🚚 Frais de transport (F CFA)</label><input type="number" id="avr-transport" placeholder="0 si pas de transport" min="0"/></div>
+<div class="field"><label>Date réception</label><input type="date" id="avr-date" value="${today()}"/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-avance-reception');document.getElementById('modal-avance-reception').remove()">Annuler</button>
+<button class="btn btn-green" style="flex:2" onclick="validerReceptionAvance('${key}')">✅ Ajouter au stock</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+addCmdLigne();
 }
 window.clorerAvance=clorerAvance;
+
+async function validerReceptionAvance(key){
+const a=fbAvances[key];if(!a)return;
+const transport=+document.getElementById("avr-transport").value||0;
+const dateRec=document.getElementById("avr-date").value||today();
+const lignesEls=document.getElementById("cmd-lignes").children;
+const lignes=[];
+for(const el of lignesEls){
+  const select=el.querySelector(".cmd-produit-select");
+  const qtyEl=el.querySelector(".cmd-qty");
+  const prixEl=el.querySelector(".cmd-prix");
+  const nomEl=el.querySelector(".cmd-nouveau-nom");
+  if(!select||!qtyEl||!prixEl)continue;
+  const qty=+qtyEl.value;
+  const prix=+prixEl.value;
+  if(!qty||!prix)continue;
+  let produitId=select.value;
+  let produitNom="";
+  if(produitId==="__nouveau__"||produitId===""){
+    const nomSaisi=nomEl?.value.trim();
+    if(!nomSaisi){alert("⚠️ Saisis le nom du nouveau produit avant de valider !");return;}
+    produitNom=nomSaisi;
+    produitId=null;
+  }else{
+    const p=getP(produitId);
+    produitNom=p?p.name:(select.options[select.selectedIndex]?.dataset?.nom||"?");
+  }
+  lignes.push({produitId:produitId||null,produit:produitNom,qty,prixRevient:prix});
+}
+if(!lignes.length)return alert("Ajoute au moins un produit reçu !");
+const totalQty=lignes.reduce((a2,l)=>a2+(+l.qty||0),0);
+const transportParUnite=totalQty>0?transport/totalQty:0;
+
+for(const l of lignes){
+  const prixRevientAjuste=Math.round(l.prixRevient+transportParUnite);
+  if(l.produitId){
+    const p=getP(l.produitId);
+    if(p){
+      const ancienTotal=p.stock*p.costPrice;
+      const nouveauTotal=l.qty*prixRevientAjuste;
+      const nouveauPrix=Math.round((ancienTotal+nouveauTotal)/(p.stock+l.qty));
+      await fbSetProduct({...p,stock:p.stock+l.qty,costPrice:nouveauPrix});
+      await fbAddMove({productId:p.id,productName:p.name,type:"in",qty:l.qty,date:dateRec,note:"Réception avance: "+(a.fournisseur||"Fournisseur")});
+    }
+  }else{
+    const newId=Date.now()+Math.random();
+    await fbSetProduct({id:newId,name:l.produit,category:"Autre",costPrice:prixRevientAjuste,stock:l.qty});
+    await fbAddMove({productId:newId,productName:l.produit,type:"in",qty:l.qty,date:dateRec,note:"Réception avance: "+(a.fournisseur||"Fournisseur")});
+  }
+}
+
+// Débiter transport de la caisse (l'avance elle-même a déjà été débitée à sa création)
+if(transport>0){
+  const tk=push(ref(db,"caisseConfig/apports")).key;
+  await set(ref(db,"caisseConfig/apports/"+tk),{_key:tk,montant:-transport,date:dateRec,note:"🚚 Transport avance: "+(a.fournisseur||"Fournisseur")});
+}
+
+await set(ref(db,"avances/"+key),{...a,status:"reçue",dateReception:dateRec,lignes});
+closeModal("modal-avance-reception");document.getElementById("modal-avance-reception")?.remove();
+alert("✅ Stock mis à jour avec "+lignes.length+" produit(s) !");
+render();
+}
+window.validerReceptionAvance=validerReceptionAvance;
 
 async function deleteAvance(key){
 if(!confirm("Supprimer cette avance ?\nLe montant sera recrédité à la caisse."))return;
