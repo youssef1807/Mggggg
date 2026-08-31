@@ -2365,23 +2365,32 @@ for(const el of lignesEls){
   lignes.push({produitId:produitId||null,produit:produitNom,qty,prixRevient:prix});
 }
 if(!lignes.length)return alert("Ajoute au moins un produit reçu !");
+
+const btn=document.querySelector('[onclick="validerReceptionAvance(\''+key+'\')"]');
+if(btn){btn.disabled=true;btn.textContent="⏳ Traitement...";}
+
+try{
 const totalQty=lignes.reduce((a2,l)=>a2+(+l.qty||0),0);
 const transportParUnite=totalQty>0?transport/totalQty:0;
 
 for(const l of lignes){
-  const prixRevientAjuste=Math.round(l.prixRevient+transportParUnite);
+  const prixRevientAjuste=Math.round((+l.prixRevient||0)+transportParUnite);
   if(l.produitId){
     const p=getP(l.produitId);
     if(p){
-      const ancienTotal=p.stock*p.costPrice;
-      const nouveauTotal=l.qty*prixRevientAjuste;
-      const nouveauPrix=Math.round((ancienTotal+nouveauTotal)/(p.stock+l.qty));
-      await fbSetProduct({...p,stock:p.stock+l.qty,costPrice:nouveauPrix});
+      const ancienTotal=(+p.stock||0)*(+p.costPrice||0);
+      const nouveauTotal=(+l.qty||0)*prixRevientAjuste;
+      const nouveauPrix=Math.round((ancienTotal+nouveauTotal)/((+p.stock||0)+(+l.qty||0)));
+      await fbSetProduct({...p,stock:(+p.stock||0)+(+l.qty||0),costPrice:nouveauPrix});
       await fbAddMove({productId:p.id,productName:p.name,type:"in",qty:l.qty,date:dateRec,note:"Réception avance: "+(a.fournisseur||"Fournisseur")});
+    }else{
+      const newId=push(ref(db,"products")).key;
+      await fbSetProduct({id:newId,name:l.produit||"Produit",category:"Autre",costPrice:prixRevientAjuste,stock:l.qty});
+      await fbAddMove({productId:newId,productName:l.produit,type:"in",qty:l.qty,date:dateRec,note:"Réception avance: "+(a.fournisseur||"Fournisseur")});
     }
   }else{
-    const newId=Date.now()+Math.random();
-    await fbSetProduct({id:newId,name:l.produit,category:"Autre",costPrice:prixRevientAjuste,stock:l.qty});
+    const newId=push(ref(db,"products")).key;
+    await fbSetProduct({id:newId,name:l.produit||"Produit",category:"Autre",costPrice:prixRevientAjuste,stock:l.qty});
     await fbAddMove({productId:newId,productName:l.produit,type:"in",qty:l.qty,date:dateRec,note:"Réception avance: "+(a.fournisseur||"Fournisseur")});
   }
 }
@@ -2396,6 +2405,11 @@ await set(ref(db,"avances/"+key),{...a,status:"reçue",dateReception:dateRec,lig
 closeModal("modal-avance-reception");document.getElementById("modal-avance-reception")?.remove();
 alert("✅ Stock mis à jour avec "+lignes.length+" produit(s) !");
 render();
+}catch(e){
+console.error("Erreur validerReceptionAvance:",e);
+alert("❌ Erreur pendant la réception :\n"+(e.message||e)+"\n\nRien n'a été perdu — réessaie, et si ça persiste, montre ce message.");
+if(btn){btn.disabled=false;btn.textContent="✅ Ajouter au stock";}
+}
 }
 window.validerReceptionAvance=validerReceptionAvance;
 
@@ -3009,26 +3023,35 @@ const c=getCommandes().find(c=>c._key===key);if(!c)return;
 const transport=+document.getElementById("rec-transport").value||0;
 const dateRec=document.getElementById("rec-date").value||today();
 
+const btn=document.querySelector('[onclick="validerReception(\''+key+'\')"]');
+if(btn){btn.disabled=true;btn.textContent="⏳ Traitement...";}
+
+try{
 const totalFournisseur=+c.totalMontant||0;
 const totalQty=(c.lignes||[]).reduce((a,l)=>a+(+l.qty||0),0);
 const transportParUnite=totalQty>0?transport/totalQty:0;
 
 // Ajouter au stock avec prix de revient ajusté (fournisseur + transport)
 for(const l of (c.lignes||[])){
-  const prixRevientAjuste=Math.round(l.prixRevient+transportParUnite);
+  const prixRevientAjuste=Math.round((+l.prixRevient||0)+transportParUnite);
   if(l.produitId){
     const p=getP(l.produitId);
     if(p){
       // Recalculer prix de revient moyen si stock existant
-      const ancienTotal=p.stock*p.costPrice;
-      const nouveauTotal=l.qty*prixRevientAjuste;
-      const nouveauPrix=Math.round((ancienTotal+nouveauTotal)/(p.stock+l.qty));
-      await fbSetProduct({...p,stock:p.stock+l.qty,costPrice:nouveauPrix});
+      const ancienTotal=(+p.stock||0)*(+p.costPrice||0);
+      const nouveauTotal=(+l.qty||0)*prixRevientAjuste;
+      const nouveauPrix=Math.round((ancienTotal+nouveauTotal)/((+p.stock||0)+(+l.qty||0)));
+      await fbSetProduct({...p,stock:(+p.stock||0)+(+l.qty||0),costPrice:nouveauPrix});
       await fbAddMove({productId:p.id,productName:p.name,type:"in",qty:l.qty,date:dateRec,note:"Réception: "+(c.fournisseur||"Fournisseur")});
+    }else{
+      // produitId référencé introuvable → on recrée comme nouveau produit pour ne pas perdre la ligne
+      const newId=push(ref(db,"products")).key;
+      await fbSetProduct({id:newId,name:l.produit||"Produit",category:"Autre",costPrice:prixRevientAjuste,stock:l.qty});
+      await fbAddMove({productId:newId,productName:l.produit,type:"in",qty:l.qty,date:dateRec,note:"Réception: "+(c.fournisseur||"Fournisseur")});
     }
   }else{
-    const newId=Date.now()+Math.random();
-    await fbSetProduct({id:newId,name:l.produit,category:"Autre",costPrice:prixRevientAjuste,stock:l.qty});
+    const newId=push(ref(db,"products")).key;
+    await fbSetProduct({id:newId,name:l.produit||"Produit",category:"Autre",costPrice:prixRevientAjuste,stock:l.qty});
     await fbAddMove({productId:newId,productName:l.produit,type:"in",qty:l.qty,date:dateRec,note:"Réception: "+(c.fournisseur||"Fournisseur")});
   }
 }
@@ -3048,6 +3071,11 @@ let msg="✅ Réception confirmée ! | 📦 Stock mis à jour | ";
 if(transport>0)msg+="🚚 Transport: "+cfa(transport)+" débité de la caisse";
 alert(msg);
 render();
+}catch(e){
+console.error("Erreur validerReception:",e);
+alert("❌ Erreur pendant la réception :\n"+(e.message||e)+"\n\nRien n'a été perdu — réessaie, et si ça persiste, montre ce message.");
+if(btn){btn.disabled=false;btn.innerHTML="📦 Confirmer & Ajouter au stock";}
+}
 }
 window.validerReception=validerReception;
 
