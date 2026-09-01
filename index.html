@@ -470,6 +470,13 @@ const pct=(a,b)=>(a+b)===0?0:Math.round((a/(a+b))*100);
 const tag=(t,c)=>`<span class="tag tag-${c}">${t}</span>`;
 const dateLabel=s=>{const d=new Date(s+"T00:00:00");return`${d.getDate()} ${MONTHS_FULL[d.getMonth()]} ${d.getFullYear()}`;};
 const toArr=obj=>obj?Object.entries(obj).map(([k,v])=>({...v,_key:k})):[];
+let _lastProductId=0;
+function newProductId(){
+let id=Date.now();
+if(id<=_lastProductId)id=_lastProductId+1;
+_lastProductId=id;
+return id;
+}
 const getProducts=()=>toArr(fbProducts);
 const getSales=()=>toArr(fbSales);
 const getRapports=()=>toArr(fbRapports);
@@ -776,9 +783,12 @@ const cost=+document.getElementById("np-cost").value;
 const cat=document.getElementById("np-cat").value;
 const stock=+document.getElementById("np-stock").value||0;
 if(!name||!cost)return alert("Nom et prix de revient obligatoires !");
-const id=Date.now();
+const btn=document.querySelector('[onclick="addProduct()"]');
+if(btn){if(btn.disabled)return;btn.disabled=true;btn.textContent="⏳...";}
+const id=newProductId();
 await fbSetProduct({id,name,category:cat,costPrice:cost,stock});
 closeModal("modal-add-prod");
+if(btn){btn.disabled=false;btn.textContent="+ Ajouter";}
 }
 window.addProduct=addProduct;
 
@@ -826,8 +836,9 @@ const v=currentRapport.ventes.find(v=>v.id===id);
 if(!v)return;
 v.isCredit=checked;
 if(!checked)v.clientCredit="";
-renderRapport();
-setTimeout(()=>currentRapport.ventes.filter(x=>x.type!=="depot").forEach(x=>refreshPreview(x.id)),100);
+const el=document.getElementById("vente-"+id);
+if(el)el.outerHTML=venteItemHtml(v);
+refreshPreview(id);
 }
 window.toggleCredit=toggleCredit;
 
@@ -846,8 +857,9 @@ if(value==="__nouveau__"){
   v.creditKey="";
   v.clientCredit="";
 }
-renderRapport();
-setTimeout(()=>currentRapport.ventes.filter(x=>x.type!=="depot").forEach(x=>refreshPreview(x.id)),100);
+const el=document.getElementById("vente-"+id);
+if(el)el.outerHTML=venteItemHtml(v);
+refreshPreview(id);
 }
 window.selectClientCredit=selectClientCredit;
 
@@ -879,7 +891,7 @@ function venteItemHtml(v){
 const isDepot=v.type==="depot";
 const depots=getDepots();
 const depotOptions=depots.map(d=>`<option value="${d._key}"${d._key===v.depotKey?" selected":""}>${d.lieu} (${d.status==="open"?"🟡 Actif":"✅ Terminé"})</option>`).join("");
-return`<div class="vente-item" style="${isDepot?"border-color:#f59e0b55;background:#f59e0b08":""}">
+return`<div class="vente-item" id="vente-${v.id}" style="${isDepot?"border-color:#f59e0b55;background:#f59e0b08":""}">
 <div class="vente-item-head">
   <span style="font-size:10px;font-weight:700;color:${isDepot?"var(--amber)":v.type==="gros"?"var(--violet)":"var(--blue)"}">${isDepot?"🏪 DÉPÔT-VENTE":v.type==="gros"?"⬡ GROS":"◎ DÉTAIL"}</span>
   <button class="vente-remove" onclick="removeVente(${v.id})">✕</button>
@@ -947,14 +959,25 @@ await saveUndoSnapshot("Rapport du "+dateLabel(rapportDate));
 const existingR=getRapports().find(r=>r.date===rapportDate);
 if(existingR){
   if(!confirm("⚠️ Un rapport existe déjà pour le "+dateLabel(rapportDate)+"!\nVoulez-vous le remplacer ?"))return;
+}else{
+  if(!confirm("Valider le rapport du "+dateLabel(rapportDate)+" ?"))return;
+}
+
+const btn=document.querySelector('[onclick="validerRapport()"]');
+const totalLignes=ventes.length+reappros.filter(r=>r.depotKey&&r.qty&&r.productId).length;
+let progression=0;
+const updateBtn=()=>{if(btn){btn.disabled=true;btn.textContent=`⏳ Traitement... (${progression}/${totalLignes})`;}};
+updateBtn();
+
+try{
+
+if(existingR){
   // Remove existing rapport and its sales/moves
   await remove(ref(db,"rapports/"+existingR._key));
   await fbRemoveSalesByDate(rapportDate);
   await fbRemoveMovesByDateOut(rapportDate);
   // Restore stock from old rapport
   for(const v of (existingR.ventes||[])){const p=getP(v.productId);if(p)await fbSetProduct({...p,stock:p.stock+v.qty});}
-}else{
-  if(!confirm("Valider le rapport du "+dateLabel(rapportDate)+" ?"))return;
 }
 const dateStr=rapportDate;
 // Traiter les réapprovisionnements dépôt
@@ -965,6 +988,7 @@ await fbSetProduct({...p,stock:p.stock-v.qty});
 await fbAddMove({productId:p.id,productName:p.name,type:"out",qty:v.qty,date:dateStr,note:"Réappro dépôt: "+depot.lieu});
 const newQtyDeposited=(+depot.qtyDeposited||0)+v.qty;
 await set(ref(db,`depots/${depot._key}`),{...depot,qtyDeposited:newQtyDeposited,status:"open"});
+progression++;updateBtn();
 }
 // Traiter les ventes normales
 const ventesF=lignesVente.map(v=>{const p=getP(v.productId);const isGift=v.price===0;
@@ -973,16 +997,18 @@ for(const v of ventesF){
 const p=getP(v.productId);
 await fbSetProduct({...p,stock:p.stock-v.qty});
 await fbAddMove({productId:p.id,productName:p.name,type:"out",qty:v.qty,date:dateStr,note:v.isGift?"Cadeau":"Vente "+v.type});
+progression++;updateBtn();
 }
 // Traiter les réappros stock dépôt
 for(const r of reappros){
   if(!r.depotKey||!r.qty||!r.productId)continue;
   const depR=getDepots().find(x=>x._key===r.depotKey);if(!depR)continue;
   const pR=getP(r.productId);
-  if(pR&&r.qty>pR.stock){alert("Stock insuffisant pour réappro dépôt \""+depR.lieu+"\" (stock: "+pR.stock+")");return;}
+  if(pR&&r.qty>pR.stock){alert("Stock insuffisant pour réappro dépôt \""+depR.lieu+"\" (stock: "+pR.stock+")");throw new Error("stock_insuffisant");}
   await set(ref(db,"depots/"+r.depotKey),{...depR,qtyDeposited:(+depR.qtyDeposited||0)+(+r.qty),productId:r.productId,productName:pR?pR.name:depR.productName,prixEstime:+r.prix||+depR.prixEstime||0});
   if(pR)await fbSetProduct({...pR,stock:pR.stock-r.qty});
   await fbAddMove({productId:pR?pR.id:r.productId,productName:pR?pR.name:depR.productName,type:"out",qty:r.qty,date:dateStr,note:"Réappro dépôt: "+depR.lieu});
+  progression++;updateBtn();
 }
 // Enregistrer le rapport
 const tousVentes=[...ventesF,...lignesDepot.map(v=>{const p=getP(v.productId);const depot=findDepotForVente(v);return{...v,productName:p.name,costPrice:p.costPrice,profit:0,isGift:false,depotKey:depot?depot._key:v.depotKey,depotNom:depot?depot.lieu:v.depotNom};})];
@@ -1023,6 +1049,13 @@ let msg="✅ Rapport validé !";
 if(lignesDepot.length)msg+="\n📦 "+lignesDepot.length+" dépôt(s) réapprovisionné(s)";
 if(ventesCredit.length)msg+="\n🤝 "+ventesCredit.length+" crédit(s) créé(s) automatiquement";
 alert(msg);render();
+}catch(e){
+console.error("Erreur validerRapport:",e);
+if(e.message!=="stock_insuffisant"){
+alert("❌ Erreur pendant la validation du rapport :\n"+(e.message||e)+"\n\nRéessaie — si des lignes ont déjà été traitées avant l'erreur, vérifie ton stock avant de revalider.");
+}
+if(btn){btn.disabled=false;btn.textContent="✅ Valider le rapport du jour";}
+}
 }
 window.validerRapport=validerRapport;
 
@@ -1400,10 +1433,11 @@ document.getElementById("mrd2-body").innerHTML=`
 <div class="prod-cell"><div class="prod-cell-lbl">Vendu</div><div class="prod-cell-val" style="color:var(--green)">${d.qtySold}</div></div>
 <div class="prod-cell"><div class="prod-cell-lbl">Restant</div><div class="prod-cell-val" style="color:var(--amber)">${qtyDispo}</div></div>
 </div></div>
-<div id="depot-action-tabs" style="display:flex;gap:8px;margin-bottom:14px">
-<button class="btn btn-green btn-sm" style="flex:1" onclick="showDepotAction('${key}','versement')">💰 Versement</button>
-<button class="btn btn-amber btn-sm" style="flex:1" onclick="showDepotAction('${key}','retour')">↩ Retour stock</button>
-${role==="admin"?`<button class="btn btn-ghost btn-sm" style="flex:1" onclick="showDepotAction('${key}','corriger')">✎ Corriger</button>`:""}
+<div id="depot-action-tabs" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+<button class="btn btn-primary btn-sm" style="flex:1;min-width:90px" onclick="showDepotAction('${key}','reappro')">📦 Réappro</button>
+<button class="btn btn-green btn-sm" style="flex:1;min-width:90px" onclick="showDepotAction('${key}','versement')">💰 Versement</button>
+<button class="btn btn-amber btn-sm" style="flex:1;min-width:90px" onclick="showDepotAction('${key}','retour')">↩ Retour stock</button>
+${role==="admin"?`<button class="btn btn-ghost btn-sm" style="flex:1;min-width:90px" onclick="showDepotAction('${key}','corriger')">✎ Corriger</button>`:""}
 </div>
 <div id="depot-action-form"></div>
 ${(()=>{
@@ -1452,7 +1486,14 @@ function showDepotAction(key,type){
 const d=getDepots().find(d=>d._key===key);if(!d)return;
 const qtyDispo=Math.max(0,(+d.qtyDeposited||0)-(+d.qtySold||0)-(+d.qtyReturned||0));
 const el=document.getElementById("depot-action-form");
-if(type==="versement"){
+if(type==="reappro"){
+const prodOptions2=getProducts().map(p=>`<option value="${p.id}">${p.name} (stock: ${p.stock})</option>`).join("");
+el.innerHTML=`<div style="font-weight:800;font-size:12px;margin-bottom:10px">📦 Ajouter du stock à ce dépôt</div>
+<div class="field" style="margin-bottom:8px"><label>Produit</label><select id="dpr-produit"><option value="">— Choisir —</option>${prodOptions2}</select></div>
+<div class="field" style="margin-bottom:8px"><label>Quantité à envoyer</label><input type="number" id="dpr-qty" placeholder="ex: 20" min="1"/></div>
+<div class="field" style="margin-bottom:10px"><label>Date</label><input type="date" id="dpr-date" value="${today()}"/></div>
+<button class="btn btn-primary btn-full" onclick="saveReapproDepot('${key}')">📦 Envoyer au dépôt</button>`;
+}else if(type==="versement"){
 const prixU=+d.prixEstime||0;
 el.innerHTML=`<div style="font-weight:800;font-size:12px;margin-bottom:10px">💰 Enregistrer un versement</div>
 <div class="field" style="margin-bottom:8px">
@@ -1466,7 +1507,7 @@ el.innerHTML=`<div style="font-weight:800;font-size:12px;margin-bottom:10px">�
 <input type="hidden" id="dv-qty" value="0"/>
 <div class="field" style="margin-bottom:10px"><label>Date</label><input type="date" id="dv-date" value="${today()}"/></div>
 <button class="btn btn-green btn-full" onclick="saveVersement('${key}')">✅ Enregistrer</button>`;
-}else{
+}else if(type==="retour"){
 const prixUr=+d.prixEstime||0;
 el.innerHTML=`<div style="font-weight:800;font-size:12px;margin-bottom:10px">↩ Retour en stock</div>
 <div class="field" style="margin-bottom:8px">
@@ -1479,8 +1520,7 @@ el.innerHTML=`<div style="font-weight:800;font-size:12px;margin-bottom:10px">↩
 </div>
 <input type="hidden" id="dr-qty" value="0"/>
 <button class="btn btn-amber btn-full" onclick="saveRetourDepot('${key}')">↩ Récupérer le stock</button>`;
-}
-if(type==="corriger"){
+}else if(type==="corriger"){
 const prixU=+d.prixEstime||0;
 const totalVerse=(d.versements||[]).reduce((a,v)=>a+(+v.montant||0),0);
 const resteActuel=Math.max(0,(+d.qtyDeposited||0)*prixU-totalVerse);
@@ -1508,6 +1548,33 @@ setTimeout(()=>{
 }
 }
 window.showDepotAction=showDepotAction;
+
+async function saveReapproDepot(key){
+const d=getDepots().find(d=>d._key===key);if(!d)return;
+const productId=document.getElementById("dpr-produit").value;
+const qty=+document.getElementById("dpr-qty").value;
+const dateRe=document.getElementById("dpr-date").value||today();
+if(!productId)return alert("Sélectionne un produit !");
+if(!qty||qty<=0)return alert("Quantité invalide !");
+const p=getP(productId);if(!p)return alert("Produit introuvable !");
+if(qty>p.stock)return alert(`Stock insuffisant (stock actuel: ${p.stock})`);
+const btn=document.querySelector('[onclick="saveReapproDepot(\''+key+'\')"]');
+if(btn){btn.disabled=true;btn.textContent="⏳...";}
+try{
+await fbSetProduct({...p,stock:p.stock-qty});
+await fbAddMove({productId:p.id,productName:p.name,type:"out",qty,date:dateRe,note:"Réappro dépôt: "+d.lieu});
+await set(ref(db,"depots/"+key),{...d,qtyDeposited:(+d.qtyDeposited||0)+qty,productId:p.id,productName:p.name,status:"open"});
+document.getElementById("depot-action-form").innerHTML="";
+alert("✅ "+qty+" unités de "+p.name+" envoyées au dépôt "+d.lieu+" !");
+openRetourDepot(key);
+render();
+}catch(e){
+console.error("Erreur saveReapproDepot:",e);
+alert("❌ Erreur : "+(e.message||e));
+if(btn){btn.disabled=false;btn.textContent="📦 Envoyer au dépôt";}
+}
+}
+window.saveReapproDepot=saveReapproDepot;
 
 async function saveCorrigerDepot(key){
 const d=getDepots().find(d=>d._key===key);if(!d)return;
@@ -2391,12 +2458,12 @@ for(const l of lignes){
       await fbSetProduct({...p,stock:(+p.stock||0)+(+l.qty||0),costPrice:nouveauPrix});
       await fbAddMove({productId:p.id,productName:p.name,type:"in",qty:l.qty,date:dateRec,note:"Réception avance: "+(a.fournisseur||"Fournisseur")});
     }else{
-      const newId=push(ref(db,"products")).key;
+      const newId=newProductId();
       await fbSetProduct({id:newId,name:l.produit||"Produit",category:"Autre",costPrice:prixRevientAjuste,stock:l.qty});
       await fbAddMove({productId:newId,productName:l.produit,type:"in",qty:l.qty,date:dateRec,note:"Réception avance: "+(a.fournisseur||"Fournisseur")});
     }
   }else{
-    const newId=push(ref(db,"products")).key;
+    const newId=newProductId();
     await fbSetProduct({id:newId,name:l.produit||"Produit",category:"Autre",costPrice:prixRevientAjuste,stock:l.qty});
     await fbAddMove({productId:newId,productName:l.produit,type:"in",qty:l.qty,date:dateRec,note:"Réception avance: "+(a.fournisseur||"Fournisseur")});
   }
@@ -3052,12 +3119,12 @@ for(const l of (c.lignes||[])){
       await fbAddMove({productId:p.id,productName:p.name,type:"in",qty:l.qty,date:dateRec,note:"Réception: "+(c.fournisseur||"Fournisseur")});
     }else{
       // produitId référencé introuvable → on recrée comme nouveau produit pour ne pas perdre la ligne
-      const newId=push(ref(db,"products")).key;
+      const newId=newProductId();
       await fbSetProduct({id:newId,name:l.produit||"Produit",category:"Autre",costPrice:prixRevientAjuste,stock:l.qty});
       await fbAddMove({productId:newId,productName:l.produit,type:"in",qty:l.qty,date:dateRec,note:"Réception: "+(c.fournisseur||"Fournisseur")});
     }
   }else{
-    const newId=push(ref(db,"products")).key;
+    const newId=newProductId();
     await fbSetProduct({id:newId,name:l.produit||"Produit",category:"Autre",costPrice:prixRevientAjuste,stock:l.qty});
     await fbAddMove({productId:newId,productName:l.produit,type:"in",qty:l.qty,date:dateRec,note:"Réception: "+(c.fournisseur||"Fournisseur")});
   }
