@@ -878,13 +878,13 @@ else{const pr=(v.price-p.costPrice)*v.qty;el.innerHTML=`<div style="display:grid
 function venteItemHtml(v){
 const isDepot=v.type==="depot";
 const depots=getDepots();
-const depotOptions=depots.map(d=>`<option value="${d.lieu}"${d.lieu===v.depotNom?" selected":""}>${d.lieu} (${d.status==="open"?"🟡 Actif":"✅ Terminé"})</option>`).join("");
+const depotOptions=depots.map(d=>`<option value="${d._key}"${d._key===v.depotKey?" selected":""}>${d.lieu} (${d.status==="open"?"🟡 Actif":"✅ Terminé"})</option>`).join("");
 return`<div class="vente-item" style="${isDepot?"border-color:#f59e0b55;background:#f59e0b08":""}">
 <div class="vente-item-head">
   <span style="font-size:10px;font-weight:700;color:${isDepot?"var(--amber)":v.type==="gros"?"var(--violet)":"var(--blue)"}">${isDepot?"🏪 DÉPÔT-VENTE":v.type==="gros"?"⬡ GROS":"◎ DÉTAIL"}</span>
   <button class="vente-remove" onclick="removeVente(${v.id})">✕</button>
 </div>
-${isDepot?`<div class="field" style="margin-bottom:8px"><label>Dépôt destinataire</label><select onchange="updateVente(${v.id},'depotNom',this.value)"><option value="">— Choisir dépôt —</option>${depotOptions}</select></div>`:""}
+${isDepot?`<div class="field" style="margin-bottom:8px"><label>Dépôt destinataire</label><select onchange="updateVente(${v.id},'depotKey',this.value)"><option value="">— Choisir dépôt —</option>${depotOptions}</select></div>`:""}
 <div class="field" style="margin-bottom:8px"><label>Produit</label><select onchange="updateVente(${v.id},'productId',this.value)">${prodOptions(v.productId)}</select></div>
 <div class="grid2">
 <div class="field"><label>Quantité</label><input type="number" min="1" value="${v.qty||""}" placeholder="0" oninput="updateVente(${v.id},'qty',this.value)"/></div>
@@ -930,11 +930,11 @@ const lignesVente=ventes.filter(v=>v.type!=="depot");
 for(const v of lignesDepot){
 if(!v.productId)return alert("Sélectionne un produit pour chaque ligne dépôt.");
 if(!v.qty||v.qty<=0)return alert("Quantité invalide pour dépôt.");
-if(!v.depotNom)return alert("Sélectionne le dépôt destinataire pour chaque ligne 🏪");
-const depot=getDepots().find(d=>d.lieu===v.depotNom);
-if(!depot)return alert(`Dépôt introuvable: "${v.depotNom}"`);
+if(!v.depotKey&&!v.depotNom)return alert("Sélectionne le dépôt destinataire pour chaque ligne 🏪");
+const depot=findDepotForVente(v);
+if(!depot)return alert(`Dépôt introuvable: "${v.depotNom||v.depotKey}"`);
 const p=getP(v.productId);
-if(v.qty>p.stock)return alert(`Stock insuffisant pour réappro "${v.depotNom}" (stock: ${p.stock})`);
+if(v.qty>p.stock)return alert(`Stock insuffisant pour réappro "${depot.lieu}" (stock: ${p.stock})`);
 }
 // Validation des ventes normales
 for(const v of lignesVente){
@@ -959,7 +959,7 @@ if(existingR){
 const dateStr=rapportDate;
 // Traiter les réapprovisionnements dépôt
 for(const v of lignesDepot){
-const depot=getDepots().find(d=>d.lieu===v.depotNom);
+const depot=findDepotForVente(v);
 const p=getP(v.productId);
 await fbSetProduct({...p,stock:p.stock-v.qty});
 await fbAddMove({productId:p.id,productName:p.name,type:"out",qty:v.qty,date:dateStr,note:"Réappro dépôt: "+depot.lieu});
@@ -985,7 +985,7 @@ for(const r of reappros){
   await fbAddMove({productId:pR?pR.id:r.productId,productName:pR?pR.name:depR.productName,type:"out",qty:r.qty,date:dateStr,note:"Réappro dépôt: "+depR.lieu});
 }
 // Enregistrer le rapport
-const tousVentes=[...ventesF,...lignesDepot.map(v=>{const p=getP(v.productId);return{...v,productName:p.name,costPrice:p.costPrice,profit:0,isGift:false};})];
+const tousVentes=[...ventesF,...lignesDepot.map(v=>{const p=getP(v.productId);const depot=findDepotForVente(v);return{...v,productName:p.name,costPrice:p.costPrice,profit:0,isGift:false,depotKey:depot?depot._key:v.depotKey,depotNom:depot?depot.lieu:v.depotNom};})];
 await fbAddRapport({date:dateStr,ventes:tousVentes,reappros:reappros.filter(r=>r.depotKey&&r.qty&&r.productId).map(r=>{const d=getDepots().find(x=>x._key===r.depotKey);const p=getP(r.productId);return{depotKey:r.depotKey,depotNom:d?d.lieu:"?",productId:r.productId,productName:p?p.name:"?",qty:+r.qty,prix:+r.prix||0};}),totals:calcTotals(ventesF),source:"manual"});
 for(const v of ventesF.filter(v=>!v.isGift)){
 await fbAddSale({productId:+v.productId,productName:v.productName,qty:v.qty,salePrice:v.price,costPrice:v.costPrice,type:v.type,date:dateStr,profit:v.profit,isCredit:!!v.isCredit});
@@ -1357,6 +1357,13 @@ function initDepotListener(){
 onValue(ref(db,"depots"),(snap)=>{fbDepots=snap.val()||{};if(role&&currentTab==="depots")renderDepots();});
 }
 const getDepots=()=>toArr(fbDepots);
+const findDepotForVente=v=>{
+  if(v.depotKey){const byKey=getDepots().find(d=>d._key===v.depotKey);if(byKey)return byKey;}
+  // Fallback par nom (ex: import IA qui ne connaît que le nom écrit) — préfère un dépôt actif en cas de doublon de nom
+  const matches=getDepots().filter(d=>d.lieu===v.depotNom);
+  if(matches.length<=1)return matches[0];
+  return matches.find(d=>d.status==="open")||matches[0];
+};
 
 async function createDepot(){
 const lieu=document.getElementById("dp-lieu").value.trim();
