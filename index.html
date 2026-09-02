@@ -803,22 +803,31 @@ const broken=all.filter(p=>{
   const idNotInteger=isNaN(+p.id)||!Number.isInteger(+p.id);
   return hasInvalidChars||idKeyMismatch||idNotInteger;
 });
-if(!broken.length){alert("✅ Aucun produit corrompu détecté — tout est en ordre !");return;}
-const liste=broken.map(p=>"• "+p.name+" (clé: "+p._key+")").join("\n");
-if(!confirm("⚠️ "+broken.length+" produit(s) avec un identifiant corrompu détecté(s) :\n\n"+liste+"\n\nCeci peut expliquer : impossible de modifier, bénéfice manquant dans les rapports.\n\nRéparer maintenant ? (le stock, nom, prix et catégorie seront conservés)"))return;
+const nanSales=getSales().filter(s=>isNaN(+s.profit)||s.profit===undefined||s.profit===null);
+if(!broken.length&&!nanSales.length){alert("✅ Aucun problème détecté — produits et ventes sont en ordre !");return;}
+let msg="";
+if(broken.length)msg+="⚠️ "+broken.length+" produit(s) avec un identifiant corrompu :\n"+broken.map(p=>"• "+p.name).join("\n")+"\n\n";
+if(nanSales.length)msg+="💰 "+nanSales.length+" vente(s) avec un bénéfice cassé (non calculé)\n\n";
+msg+="Ceci peut expliquer : impossible de modifier un produit, bénéfice manquant dans les rapports/dashboard.\n\nRéparer maintenant ? (stock, nom, prix, catégorie conservés)";
+if(!confirm(msg))return;
 repairProducts(broken);
 }
 window.auditProducts=auditProducts;
 
 async function repairProducts(broken){
-let repaired=0,errors=0;
+let repaired=0,errors=0,salesFixed=0;
 for(const p of broken){
   try{
     const newId=newProductId();
-    await fbSetProduct({id:newId,name:p.name,category:p.category||"Autre",costPrice:+p.costPrice||0,stock:+p.stock||0});
-    // Relier les ventes existantes à ce produit vers le nouvel id (historique)
+    const cleanCost=+p.costPrice||0;
+    await fbSetProduct({id:newId,name:p.name,category:p.category||"Autre",costPrice:cleanCost,stock:+p.stock||0});
+    // Relier les ventes existantes à ce produit vers le nouvel id ET recalculer leur bénéfice (qui était probablement cassé)
     for(const s of getSales().filter(s=>String(s.productId)===String(p._key)||String(s.productId)===String(p.id))){
-      await set(ref(db,"sales/"+s._key),{...s,productId:newId,productName:p.name});
+      const salePrice=+s.salePrice||0;
+      const qty=+s.qty||0;
+      const newProfit=(salePrice-cleanCost)*qty;
+      await set(ref(db,"sales/"+s._key),{...s,productId:newId,productName:p.name,costPrice:cleanCost,profit:newProfit});
+      salesFixed++;
     }
     for(const m of getMoves().filter(m=>String(m.productId)===String(p._key)||String(m.productId)===String(p.id))){
       await set(ref(db,"moves/"+m._key),{...m,productId:newId,productName:p.name});
@@ -831,7 +840,22 @@ for(const p of broken){
     errors++;
   }
 }
-alert("✅ "+repaired+" produit(s) réparé(s)."+(errors?"\n⚠️ "+errors+" erreur(s) — voir console.":"")+"\n\nVérifie maintenant que tu peux bien les modifier, et que les rapports passés affichent le bon bénéfice.");
+// Deuxième passe: corriger toute vente avec un bénéfice cassé (NaN), même sans lien à un produit corrompu détecté
+let nanFixed=0;
+for(const s of getSales()){
+  if(isNaN(+s.profit)||s.profit===undefined||s.profit===null){
+    const prod=getP(s.productId);
+    const cost=prod?+prod.costPrice||0:+s.costPrice||0;
+    const salePrice=+s.salePrice||0;
+    const qty=+s.qty||0;
+    const fixedProfit=(salePrice-cost)*qty;
+    if(!isNaN(fixedProfit)){
+      await set(ref(db,"sales/"+s._key),{...s,costPrice:cost,profit:fixedProfit});
+      nanFixed++;
+    }
+  }
+}
+alert("✅ "+repaired+" produit(s) réparé(s).\n💰 "+salesFixed+" vente(s) recalculée(s)."+(nanFixed?"\n🔧 "+nanFixed+" vente(s) supplémentaire(s) avec bénéfice cassé corrigée(s).":"")+(errors?"\n⚠️ "+errors+" erreur(s) — voir console.":"")+"\n\nVérifie maintenant tes rapports et le dashboard.");
 render();
 }
 window.repairProducts=repairProducts;
