@@ -249,7 +249,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Syne',
 <div style="font-size:14px;font-weight:700;text-align:center" id="scan-status">🤖 L'IA analyse votre cahier...</div>
 <div style="font-size:11px;color:var(--muted);text-align:center">Détection des ventes en cours</div>
 </div>
-<input type="file" id="photo-input" accept="image/*" style="display:none" onchange="handlePhoto(event)"/>
+<input type="file" id="photo-input" accept="image/*" multiple style="display:none" onchange="handlePhoto(event)"/>
 <!-- MODAL STOCK IN -->
 <div class="overlay" id="modal-stock-in" style="display:none">
 <div class="sheet">
@@ -1064,16 +1064,23 @@ await saveUndoSnapshot("Journée vide: "+dateLabel(rapportDate));
 const existingRV=getRapports().find(r=>r.date===rapportDate);
 if(existingRV){
   if(!confirm("⚠️ Un rapport existe déjà pour le "+dateLabel(rapportDate)+"!\nVoulez-vous le remplacer par une journée vide ?"))return;
+}else{
+  if(!confirm("Confirmer : aucune vente le "+dateLabel(rapportDate)+" ?"))return;
+}
+try{
+if(existingRV){
   await remove(ref(db,"rapports/"+existingRV._key));
   await fbRemoveSalesByDate(rapportDate);
   await fbRemoveMovesByDateOut(rapportDate);
   for(const v of (existingRV.ventes||[])){const p=getP(v.productId);if(p)await fbSetProduct({...p,stock:p.stock+v.qty});}
-}else{
-  if(!confirm("Confirmer : aucune vente le "+dateLabel(rapportDate)+" ?"))return;
 }
 await fbAddRapport({date:rapportDate,ventes:[],totals:{benefGros:0,benefDetail:0,perteCadeaux:0,totalProfit:0,totalCA:0,nbCadeaux:0,nbVentes:0},source:"zero"});
 rapportMode="choose";
 alert("✅ Journée sans vente enregistrée.");render();
+}catch(e){
+console.error("Erreur validerJourneeVide:",e);
+alert("❌ Erreur :\n"+(e.message||e));
+}
 }
 window.validerJourneeVide=validerJourneeVide;
 
@@ -1085,21 +1092,53 @@ document.body.insertAdjacentHTML("beforeend",h);
 }
 window.triggerPhoto=triggerPhoto;
 
-async function handlePhoto(event){
-const file=event.target.files[0];if(!file)return;
-event.target.value="";
-const base64=await new Promise(res=>{
-const r=new FileReader();
-r.onload=e=>res(e.target.result.split(",")[1]);
-r.readAsDataURL(file);
+function resizeImageToBase64(file,maxDim=1600,quality=0.85){
+return new Promise((resolve,reject)=>{
+const img=new Image();
+const url=URL.createObjectURL(file);
+img.onload=()=>{
+URL.revokeObjectURL(url);
+let w=img.width,h=img.height;
+if(w>maxDim||h>maxDim){
+  if(w>h){h=Math.round(h*maxDim/w);w=maxDim;}
+  else{w=Math.round(w*maxDim/h);h=maxDim;}
+}
+const canvas=document.createElement("canvas");
+canvas.width=w;canvas.height=h;
+const ctx=canvas.getContext("2d");
+ctx.drawImage(img,0,0,w,h);
+const dataUrl=canvas.toDataURL("image/jpeg",quality);
+resolve(dataUrl.split(",")[1]);
+};
+img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error("Image illisible"));};
+img.src=url;
 });
+}
+
+async function handlePhoto(event){
+const files=Array.from(event.target.files||[]).slice(0,5);
+if(!files.length)return;
+event.target.value="";
 const overlay=document.getElementById("scan-overlay");
 const status=document.getElementById("scan-status");
 overlay.style.display="flex";
-status.textContent="🤖 Gemini analyse votre cahier...";
+status.textContent=files.length>1?`📷 Lecture de ${files.length} photos...`:"📷 Lecture de la photo...";
+
+let imageParts;
+try{
+imageParts=await Promise.all(files.map(async f=>({inline_data:{mime_type:"image/jpeg",data:await resizeImageToBase64(f)}})));
+}catch(e){
+overlay.style.display="none";
+alert("❌ Erreur de lecture de l'image : "+(e.message||e));
+return;
+}
+
+status.textContent=files.length>1?`🤖 Gemini analyse ${files.length} photos...`:"🤖 Gemini analyse votre cahier...";
 const productList=getProducts().map(p=>`- "${p.name}" (id:${p.id}, revient:${p.costPrice}F, stock:${p.stock})`).join("\n");
 const depotList=getDepots().filter(d=>d.status==="open").map(d=>`- "${d.lieu}" (produit: ${d.productName})`).join("\n")||"Aucun dépôt actif";
 const prompt=`Tu es un assistant expert en lecture de rapports de vente manuscrits pour une boutique de vape.
+
+${files.length>1?`ATTENTION: Il y a ${files.length} photos ci-dessous — elles peuvent être la suite les unes des autres (plusieurs pages ou plusieurs lignes du même cahier). Combine TOUTES les lignes trouvées sur TOUTES les photos dans une seule liste "ventes".`:""}
 
 Produits disponibles dans la boutique:
 ${productList}
@@ -1107,7 +1146,7 @@ ${productList}
 Dépôts-vente actifs:
 ${depotList}
 
-Regarde attentivement cette photo. Elle peut contenir soit des ventes normales, soit un réapprovisionnement de dépôt-vente.
+Regarde attentivement ${files.length>1?"ces photos":"cette photo"}. Elle${files.length>1?"s peuvent":" peut"} contenir soit des ventes normales, soit un réapprovisionnement de dépôt-vente.
 
 Si tu détectes un nom de lieu/dépôt dans la photo (ex: "Stand Marché", "Kiosque Centre", etc.), c'est un réapprovisionnement de dépôt.
 Si c'est un réapprovisionnement de dépôt, mettre "depot" dans le champ type et le nom du dépôt dans "depotNom".
@@ -1129,37 +1168,51 @@ IMPORTANT: Détecte bien les ventes à crédit — souvent noté "Nom client - c
 Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans backticks, sans explication:
 {"ventes":[{"productId":1,"productName":"Elf Bar 600","qty":1,"price":3500,"type":"detail","depotNom":"","isGift":false,"isCredit":true,"clientCredit":"Mamadou"}],"notes":""}`;
 try{
-const resp=await fetch(GEMINI_URL,{
+const controller=new AbortController();
+const timeoutId=setTimeout(()=>controller.abort(),60000);
+let resp;
+try{
+resp=await fetch(GEMINI_URL,{
 method:"POST",
 headers:{"Content-Type":"application/json"},
+signal:controller.signal,
 body:JSON.stringify({
 contents:[{parts:[
-{inline_data:{mime_type:file.type||"image/jpeg",data:base64}},
+...imageParts,
 {text:prompt}
 ]}],
-generationConfig:{temperature:0.1,maxOutputTokens:4096}
+generationConfig:{temperature:0.1,maxOutputTokens:8192}
 })
 });
+}finally{
+clearTimeout(timeoutId);
+}
 overlay.style.display="none";
 if(!resp.ok){
 let errMsg=`Erreur Gemini (${resp.status})`;
 try{const e=await resp.json();errMsg=e?.error?.message||errMsg;}catch{}
-alert("❌ "+errMsg);
+alert("❌ "+errMsg+"\n\nRéessaie — si ça persiste avec plusieurs photos, essaie avec une seule à la fois.");
 return;
 }
 const data=await resp.json();
+const cand=data.candidates?.[0];
+if(cand?.finishReason==="MAX_TOKENS"){
+  alert("⚠️ Trop de lignes détectées pour une seule analyse !\nEssaie avec moins de photos à la fois (1 ou 2), ou scanne le cahier en plusieurs fois.");
+  return;
+}
+if(cand?.finishReason==="SAFETY"||cand?.finishReason==="BLOCKED"){
+  alert("⚠️ Gemini a bloqué cette photo (filtre de sécurité).\nEssaie une photo plus claire, cadrée uniquement sur le cahier.");
+  return;
+}
 // Extract text from all possible response structures
 let text="";
 try{
-  const cand=data.candidates?.[0];
   const parts=cand?.content?.parts||[];
   text=parts.map(p=>p.text||"").join("").trim();
-  // gemini-2.5 sometimes uses finishReason with empty parts - check output
   if(!text&&cand?.content?.text)text=cand.content.text.trim();
 }catch(ex){console.warn("extract err",ex);}
 console.log("Gemini raw:",JSON.stringify(data).slice(0,500));
 if(!text){
-  // Show raw response to debug
   const raw=JSON.stringify(data).slice(0,300);
   alert("❌ Réponse vide de Gemini. Debug: "+raw);
   return;
@@ -1172,7 +1225,7 @@ let parsed;
 try{parsed=JSON.parse(clean);}
 catch(e){
 try{parsed=JSON.parse(clean.replace(/,\s*([}\]])/g,"$1"));}catch{}
-if(!parsed){alert("❌ JSON invalide. Réponse IA: "+text.slice(0,200));return;}
+if(!parsed){alert("❌ JSON invalide (réponse probablement coupée). Réessaie avec moins de photos à la fois.\n\nDébut de la réponse: "+text.slice(0,200));return;}
 }
 if(parsed.ventes&&parsed.ventes.length>0){
 // Toutes les ventes (normales + dépôt) vont dans le rapport pour confirmation
@@ -1193,13 +1246,17 @@ if(parsed.notes&&parsed.notes.trim())alert("📝 Note IA: "+parsed.notes);
 render();
 setTimeout(()=>currentRapport.ventes.forEach(v=>refreshPreview(v.id)),150);
 }else{
-alert("⚠️ Aucune vente détectée sur la photo.\nVérifie que le cahier est bien lisible et bien éclairé, puis réessaie.");
+alert("⚠️ Aucune vente détectée sur "+(files.length>1?"les photos":"la photo")+".\nVérifie que le cahier est bien lisible et bien éclairé, puis réessaie.");
 rapportMode="manual";
 render();
 }
 }catch(err){
 overlay.style.display="none";
+if(err.name==="AbortError"){
+alert("❌ Délai dépassé (60s) — le réseau est trop lent ou Gemini ne répond pas.\nRéessaie avec moins de photos ou une meilleure connexion.");
+}else{
 alert("❌ Erreur réseau: "+err.message);
+}
 }
 }
 window.handlePhoto=handlePhoto;
@@ -1241,6 +1298,7 @@ async function deleteRapport(key){
 const r=getRapports().find(r=>r._key===key);if(!r)return;
 if(!confirm("Supprimer le rapport du "+dateLabel(r.date)+" ?\n⚠️ Le stock sera restauré."))return;
 await saveUndoSnapshot("Supprimer rapport "+r.date);
+try{
 // Restore stock
 for(const v of (r.ventes||[])){
   if(v.isGift||v.type==="depot")continue;
@@ -1253,11 +1311,14 @@ await fbRemoveMovesByDateOut(r.date);
 await remove(ref(db,"rapports/"+key));
 alert("✅ Rapport supprimé !");
 render();
+}catch(e){
+console.error("Erreur deleteRapport:",e);
+alert("❌ Erreur pendant la suppression :\n"+(e.message||e));
+}
 }
 window.deleteRapport=deleteRapport;
 
-function renderEditRapport(){
-function evHtml(v){
+function editVenteItemHtml(v){
 const creditBlock=v.isCredit
   ?('<div class="field"><label>Client</label>'
     +'<select onchange="updateEditVenteCreditKey('+v.id+',this.value)">'
@@ -1270,7 +1331,7 @@ const creditBlock=v.isCredit
       ?('<div class="field"><input type="text" placeholder="Nom du client" value="'+(v.clientCredit||"")+'" oninput="updateEditVente('+v.id+',\'clientCredit\',this.value)"/></div>')
       :""))
   :"";
-return '<div class="vente-item" style="margin-bottom:8px">'
+return '<div class="vente-item" id="editvente-'+v.id+'" style="margin-bottom:8px">'
   +'<div class="vente-item-head"><span style="font-size:10px;color:var(--muted);font-weight:700">'+(v.type==="gros"?"⬡ GROS":"◎ DÉTAIL")+'</span><button class="vente-remove" onclick="removeEditVente('+v.id+')">✕</button></div>'
   +'<div class="field" style="margin-bottom:8px"><label>Produit</label><select onchange="updateEditVente('+v.id+',\'productId\',this.value)">'+prodOptions(v.productId)+'</select></div>'
   +'<div class="grid2"><div class="field"><label>Quantité</label><input type="number" min="1" value="'+v.qty+'" oninput="updateEditVente('+v.id+',\'qty\',this.value)"/></div>'
@@ -1282,6 +1343,8 @@ return '<div class="vente-item" style="margin-bottom:8px">'
   +creditBlock
   +'</div></div>';
 }
+function renderEditRapport(){
+const evHtml=editVenteItemHtml;
 document.getElementById("mer-body").innerHTML=`<div style="background:#f59e0b14;border:1px solid #f59e0b33;border-radius:9px;padding:10px 12px;font-size:11px;color:var(--amber);margin-bottom:4px">⚠️ Modification recalcule le stock et bénéfices.</div><div style="font-size:11px;font-weight:800;color:var(--violet);margin-bottom:6px">⬡ GROS</div>${editVentes.filter(v=>v.type==="gros").map(evHtml).join("")}<button class="btn btn-violet btn-sm btn-full" onclick="addEditVente('gros')" style="margin-bottom:12px">+ Ajouter gros</button><div style="font-size:11px;font-weight:800;color:var(--blue);margin-bottom:6px">◎ DÉTAIL</div>${editVentes.filter(v=>v.type==="detail").map(evHtml).join("")}<button class="btn btn-primary btn-sm btn-full" onclick="addEditVente('detail')">+ Ajouter détail</button>`;
 document.getElementById("mer-footer").innerHTML=`<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-edit-rapport')">Annuler</button><button class="btn btn-green" style="flex:2" onclick="saveEditRapport()">✅ Sauvegarder</button>`;
 }
@@ -1290,14 +1353,16 @@ function updateEditVenteCredit(id,checked){
 const v=editVentes.find(v=>v.id===id);if(!v)return;
 v.isCredit=checked;
 if(!checked){v.clientCredit="";v.creditKey="";}
-renderEditRapport();
+const el=document.getElementById("editvente-"+id);
+if(el)el.outerHTML=editVenteItemHtml(v);
 }
 window.updateEditVenteCredit=updateEditVenteCredit;
 function updateEditVenteCreditKey(id,val){
 const v=editVentes.find(v=>v.id===id);if(!v)return;
 if(val==="__nouveau__"||val===""){v.creditKey="";v.clientCredit="";}
 else{const c=getCredits().find(c=>c._key===val);v.creditKey=val;v.clientCredit=c?c.client:"";}
-renderEditRapport();
+const el=document.getElementById("editvente-"+id);
+if(el)el.outerHTML=editVenteItemHtml(v);
 }
 window.updateEditVenteCreditKey=updateEditVenteCreditKey;
 function addEditVente(type){editVentes.push({id:Date.now(),productId:"",qty:1,price:0,type,isGift:false});renderEditRapport();}
@@ -1317,6 +1382,9 @@ const r=getRapports().find(r=>r._key===editingRapportId);if(!r)return;
 for(const v of editVentes){if(!v.productId)return alert("Sélectionne un produit pour chaque ligne.");}
 await saveUndoSnapshot("Modifier rapport");
 if(!confirm("Sauvegarder les modifications ?"))return;
+const btn=document.querySelector('[onclick="saveEditRapport()"]');
+if(btn){btn.disabled=true;btn.textContent="⏳ Traitement...";}
+try{
 for(const v of (r.ventes||[])){const p=getP(v.productId);if(p)await fbSetProduct({...p,stock:p.stock+v.qty});}
 await fbRemoveSalesByDate(r.date);
 await fbRemoveMovesByDateOut(r.date);
@@ -1338,6 +1406,11 @@ for(const vc of ventesCredit){
 }
 await fbUpdateRapport(editingRapportId,{...r,ventes:ventesF,totals:calcTotals(ventesF)});
 closeModal("modal-edit-rapport");alert("✅ Rapport modifié !");render();
+}catch(e){
+console.error("Erreur saveEditRapport:",e);
+alert("❌ Erreur pendant la modification :\n"+(e.message||e)+"\n\nVérifie ton stock avant de réessayer, certaines lignes ont pu être traitées.");
+if(btn){btn.disabled=false;btn.textContent="✅ Sauvegarder";}
+}
 }
 window.saveEditRapport=saveEditRapport;
 
@@ -1410,6 +1483,7 @@ const p=getP(pid);
 if(!lieu||!pid||!qty||!date)return alert("Remplis tous les champs obligatoires !");
 if(!noStock&&qty>p.stock)return alert(`Stock insuffisant (stock: ${p.stock})`);
 if(!confirm(`Créer un dépôt de ${qty} ${p.name} chez "${lieu}" ?${noStock?"\n📦 Dépôt historique — stock non déduit":""}`))return;
+try{
 if(!noStock){
   await fbSetProduct({...p,stock:p.stock-qty});
   await fbAddMove({productId:p.id,productName:p.name,type:"out",qty,date,note:"Dépôt-vente: "+lieu});
@@ -1419,6 +1493,10 @@ await set(ref(db,`depots/${k}`),{_key:k,lieu,productId:p.id,productName:p.name,q
 closeModal("modal-add-depot");
 alert("✅ Dépôt créé !"+(noStock?" (stock non modifié)":""));
 render();
+}catch(e){
+console.error("Erreur createDepot:",e);
+alert("❌ Erreur :\n"+(e.message||e));
+}
 }
 window.createDepot=createDepot;
 
@@ -1487,12 +1565,12 @@ const d=getDepots().find(d=>d._key===key);if(!d)return;
 const qtyDispo=Math.max(0,(+d.qtyDeposited||0)-(+d.qtySold||0)-(+d.qtyReturned||0));
 const el=document.getElementById("depot-action-form");
 if(type==="reappro"){
-const prodOptions2=getProducts().map(p=>`<option value="${p.id}">${p.name} (stock: ${p.stock})</option>`).join("");
 el.innerHTML=`<div style="font-weight:800;font-size:12px;margin-bottom:10px">📦 Ajouter du stock à ce dépôt</div>
-<div class="field" style="margin-bottom:8px"><label>Produit</label><select id="dpr-produit"><option value="">— Choisir —</option>${prodOptions2}</select></div>
-<div class="field" style="margin-bottom:8px"><label>Quantité à envoyer</label><input type="number" id="dpr-qty" placeholder="ex: 20" min="1"/></div>
-<div class="field" style="margin-bottom:10px"><label>Date</label><input type="date" id="dpr-date" value="${today()}"/></div>
-<button class="btn btn-primary btn-full" onclick="saveReapproDepot('${key}')">📦 Envoyer au dépôt</button>`;
+<div id="dpr-lignes" style="display:flex;flex-direction:column;gap:10px"></div>
+<button class="btn btn-ghost btn-sm btn-full" onclick="addDprLigne()" style="margin-top:8px">+ Ajouter un modèle</button>
+<div class="field" style="margin-top:10px"><label>Date</label><input type="date" id="dpr-date" value="${today()}"/></div>
+<button class="btn btn-primary btn-full" style="margin-top:6px" onclick="saveReapproDepot('${key}')">📦 Envoyer au dépôt</button>`;
+addDprLigne();
 }else if(type==="versement"){
 const prixU=+d.prixEstime||0;
 el.innerHTML=`<div style="font-weight:800;font-size:12px;margin-bottom:10px">💰 Enregistrer un versement</div>
@@ -1549,23 +1627,85 @@ setTimeout(()=>{
 }
 window.showDepotAction=showDepotAction;
 
+let _dprLigneId=0;
+function addDprLigne(){
+const id=++_dprLigneId;
+const prodOptions2=getProducts().map(p=>`<option value="${p.id}">${p.name} (stock: ${p.stock})</option>`).join("");
+const html=`<div class="dpr-ligne" id="dpr-ligne-${id}" style="background:var(--bg);border-radius:9px;padding:10px 12px;position:relative">
+<button onclick="document.getElementById('dpr-ligne-${id}').remove()" style="position:absolute;top:8px;right:8px;background:#ef444422;border:1px solid #ef444444;color:var(--red);border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;font-weight:700">✕</button>
+<div class="field" style="margin-bottom:8px"><label>Modèle</label><select class="dpr-produit" onchange="onDprProduitChange(this,'${id}')"><option value="">— Choisir —</option>${prodOptions2}<option value="__nouveau__">➕ Nouveau produit</option></select></div>
+<div id="dpr-nouveau-${id}" style="display:none;margin-bottom:8px"><input type="text" class="dpr-nouveau-nom" placeholder="Nom du nouveau produit"/></div>
+<div class="grid2">
+<div class="field"><label>Quantité</label><input type="number" class="dpr-qty" placeholder="ex: 20" min="1"/></div>
+<div class="field"><label>Prix de vente/u (F)</label><input type="number" class="dpr-prix-vente" placeholder="ex: 2500" min="0"/></div>
+</div>
+</div>`;
+document.getElementById("dpr-lignes").insertAdjacentHTML("beforeend",html);
+}
+window.addDprLigne=addDprLigne;
+
+function onDprProduitChange(select,id){
+const nouveauDiv=document.getElementById("dpr-nouveau-"+id);
+if(!nouveauDiv)return;
+nouveauDiv.style.display=select.value==="__nouveau__"?"block":"none";
+}
+window.onDprProduitChange=onDprProduitChange;
+
 async function saveReapproDepot(key){
 const d=getDepots().find(d=>d._key===key);if(!d)return;
-const productId=document.getElementById("dpr-produit").value;
-const qty=+document.getElementById("dpr-qty").value;
 const dateRe=document.getElementById("dpr-date").value||today();
-if(!productId)return alert("Sélectionne un produit !");
-if(!qty||qty<=0)return alert("Quantité invalide !");
-const p=getP(productId);if(!p)return alert("Produit introuvable !");
-if(qty>p.stock)return alert(`Stock insuffisant (stock actuel: ${p.stock})`);
+const ligneEls=document.querySelectorAll("#dpr-lignes .dpr-ligne");
+const lignes=[];
+for(const el of ligneEls){
+  const select=el.querySelector(".dpr-produit");
+  const qtyEl=el.querySelector(".dpr-qty");
+  const prixEl=el.querySelector(".dpr-prix-vente");
+  const nomEl=el.querySelector(".dpr-nouveau-nom");
+  const qty=+qtyEl.value;
+  const prixVente=+prixEl.value;
+  if(!select.value||!qty)continue;
+  if(!prixVente)return alert("Indique le prix de vente pour chaque modèle !");
+  if(select.value==="__nouveau__"){
+    const nom=nomEl?.value.trim();
+    if(!nom)return alert("Saisis le nom du nouveau produit !");
+    lignes.push({productId:null,nom,qty,prixVente});
+  }else{
+    const p=getP(select.value);
+    if(!p)continue;
+    if(qty>p.stock)return alert(`Stock insuffisant pour ${p.name} (stock: ${p.stock})`);
+    lignes.push({productId:select.value,nom:p.name,qty,prixVente});
+  }
+}
+if(!lignes.length)return alert("Ajoute au moins un modèle avec sa quantité et son prix !");
+
 const btn=document.querySelector('[onclick="saveReapproDepot(\''+key+'\')"]');
 if(btn){btn.disabled=true;btn.textContent="⏳...";}
 try{
-await fbSetProduct({...p,stock:p.stock-qty});
-await fbAddMove({productId:p.id,productName:p.name,type:"out",qty,date:dateRe,note:"Réappro dépôt: "+d.lieu});
-await set(ref(db,"depots/"+key),{...d,qtyDeposited:(+d.qtyDeposited||0)+qty,productId:p.id,productName:p.name,status:"open"});
+let totalQtyAjoutee=0,totalValeurAjoutee=0;
+const nomsProduits=new Set((d.produitsNoms||[d.productName]).filter(Boolean));
+for(const l of lignes){
+  if(l.productId){
+    const p=getP(l.productId);
+    await fbSetProduct({...p,stock:p.stock-l.qty});
+    await fbAddMove({productId:p.id,productName:p.name,type:"out",qty:l.qty,date:dateRe,note:"Réappro dépôt: "+d.lieu});
+  }else{
+    const newId=newProductId();
+    await fbSetProduct({id:newId,name:l.nom,category:"Autre",costPrice:0,stock:0});
+    await fbAddMove({productId:newId,productName:l.nom,type:"out",qty:l.qty,date:dateRe,note:"Réappro dépôt (nouveau produit): "+d.lieu});
+  }
+  totalQtyAjoutee+=l.qty;
+  totalValeurAjoutee+=l.qty*l.prixVente;
+  nomsProduits.add(l.nom);
+}
+// Prix estimé pondéré : moyenne entre ce qui était déjà déposé et ce qu'on ajoute
+const ancienQty=Math.max(0,(+d.qtyDeposited||0));
+const ancienValeur=ancienQty*(+d.prixEstime||0);
+const nouveauQtyTotal=ancienQty+totalQtyAjoutee;
+const nouveauPrixEstime=nouveauQtyTotal>0?Math.round((ancienValeur+totalValeurAjoutee)/nouveauQtyTotal):0;
+
+await set(ref(db,"depots/"+key),{...d,qtyDeposited:nouveauQtyTotal,prixEstime:nouveauPrixEstime,produitsNoms:[...nomsProduits],productName:[...nomsProduits].join(", "),status:"open"});
 document.getElementById("depot-action-form").innerHTML="";
-alert("✅ "+qty+" unités de "+p.name+" envoyées au dépôt "+d.lieu+" !");
+alert("✅ "+lignes.length+" modèle(s) envoyé(s) au dépôt "+d.lieu+" ("+totalQtyAjoutee+" unités) !");
 openRetourDepot(key);
 render();
 }catch(e){
@@ -1622,6 +1762,7 @@ const m=getMoves().find(m=>m._key===moveKey);if(!m)return;
 const newQty=+prompt("Nouvelle quantité :",m.qty);
 if(!newQty||newQty<=0)return;
 const diff=newQty-m.qty;
+try{
 // Update the move
 await set(ref(db,"moves/"+moveKey),{...m,qty:newQty});
 // Update depot qty
@@ -1634,6 +1775,10 @@ if(type==="entree"){
 }
 alert("✅ Modifié !");
 openRetourDepot(depotKey);
+}catch(e){
+console.error("Erreur editMove:",e);
+alert("❌ Erreur :\n"+(e.message||e));
+}
 }
 window.editMove=editMove;
 
@@ -3417,7 +3562,7 @@ const status=document.getElementById("scan-status");
 if(overlay){overlay.style.display="flex";status.textContent="🗑️ Réinitialisation en cours...";}
 
 try{
-  const paths=["products","sales","rapports","moves","depots","depenses","credits","commandes","caisseConfig","retraits"];
+  const paths=["products","sales","rapports","moves","depots","depenses","credits","commandes","caisseConfig","retraits","avances","commandesClients","investisseurs"];
   for(const path of paths){
     await remove(ref(db,path));
   }
