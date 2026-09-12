@@ -2342,7 +2342,7 @@ toArr(fbDepenses).forEach(d=>{
 // Retraits
 getRetraits().forEach(r=>{totalSorties+=(+r.montant||0);});
 // Avances fournisseurs
-getAvances().forEach(a=>{totalSorties+=(+a.montant||0);});
+getAvances().forEach(a=>{totalSorties+=avTotalMontant(a);});
 // Paiements fournisseurs pour commandes clients (VIP)
 getCommandesClients().forEach(cc=>{(cc.paiements||[]).forEach(p=>{totalSorties+=(+p.montant||0);});});
 // Apports manuels
@@ -2428,6 +2428,9 @@ getRetraits().forEach(r=>{
 // Avances fournisseurs
 getAvances().forEach(a=>{
   addEntry(a.date,"🧾 Avance fournisseur: "+(a.fournisseur||"?"),-a.montant,"avance");
+(a.versements||[]).forEach(v=>{
+  addEntry(v.date,"🧾 Avance fournisseur (complément): "+(a.fournisseur||"?"),-v.montant,"avance");
+});
 });
 // Commandes clients (VIP): versements du client (entrée) + paiements au fournisseur (sortie)
 getCommandesClients().forEach(cc=>{
@@ -2562,6 +2565,7 @@ function initAvancesListener(){
 onValue(ref(db,"avances"),(snap)=>{fbAvances=snap.val()||{};if(role&&currentTab==="commandes")render();});
 }
 const getAvances=()=>toArr(fbAvances).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+const avTotalMontant=a=>(+a.montant||0)+(a.versements||[]).reduce((s,v)=>s+(+v.montant||0),0);
 
 function openAddAvance(){
 const html=`<div class="overlay" id="modal-avance" style="display:flex">
@@ -2597,6 +2601,39 @@ render();
 }
 window.saveAvance=saveAvance;
 
+function openAvanceTopUp(key){
+const a=fbAvances[key];if(!a)return;
+const html=`<div class="overlay" id="modal-avance-topup" style="display:flex">
+<div class="sheet">
+<div class="sheet-handle"></div>
+<div class="sheet-header"><span class="sheet-title">🧾 Nouveau versement — ${a.fournisseur||"Fournisseur"}</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-avance-topup');document.getElementById('modal-avance-topup').remove()">✕</button></div>
+<div class="sheet-body">
+<div style="font-size:11px;color:var(--muted);margin-bottom:10px">Déjà avancé jusqu'ici : <b>${cfa(avTotalMontant(a))}</b></div>
+<div class="field"><label>Montant supplémentaire (F CFA)</label><input type="number" id="avt-montant" placeholder="ex: 50000" min="0"/></div>
+<div class="field"><label>Date</label><input type="date" id="avt-date" value="${today()}"/></div>
+</div>
+<div class="sheet-footer">
+<button class="btn btn-ghost" style="flex:1" onclick="closeModal('modal-avance-topup');document.getElementById('modal-avance-topup').remove()">Annuler</button>
+<button class="btn btn-amber" style="flex:2" onclick="saveAvanceTopUp('${key}')">🧾 Ajouter → Débiter caisse</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML("beforeend",html);
+}
+window.openAvanceTopUp=openAvanceTopUp;
+
+async function saveAvanceTopUp(key){
+const a=fbAvances[key];if(!a)return;
+const montant=+document.getElementById("avt-montant").value;
+const date=document.getElementById("avt-date").value||today();
+if(!montant||montant<=0)return alert("Montant invalide");
+const versements=[...(a.versements||[]),{montant,date}];
+await set(ref(db,"avances/"+key),{...a,versements});
+closeModal("modal-avance-topup");document.getElementById("modal-avance-topup")?.remove();
+render();
+}
+window.saveAvanceTopUp=saveAvanceTopUp;
+
 function clorerAvance(key){
 const a=fbAvances[key];if(!a)return;
 const html=`<div class="overlay" id="modal-avance-reception" style="display:flex">
@@ -2605,7 +2642,7 @@ const html=`<div class="overlay" id="modal-avance-reception" style="display:flex
 <div class="sheet-header"><span class="sheet-title">📦 Marchandise reçue: ${a.fournisseur||"Fournisseur"}</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-avance-reception');document.getElementById('modal-avance-reception').remove()">✕</button></div>
 <div class="sheet-body">
 <div style="background:#f59e0b14;border:1px solid #f59e0b33;border-radius:9px;padding:10px 12px;font-size:11px;color:var(--amber);margin-bottom:10px">
-💡 Détaille les produits reçus pour ${cfa(a.montant)} — ils s'ajoutent au stock au prix de revient indiqué. L'avance a déjà été débitée de la caisse, rien ne sera redébité.
+💡 Détaille les produits reçus pour ${cfa(avTotalMontant(a))} — ils s'ajoutent au stock au prix de revient indiqué. L'avance a déjà été débitée de la caisse, rien ne sera redébité.
 </div>
 <div id="cmd-lignes" style="display:flex;flex-direction:column;gap:10px"></div>
 <button class="btn btn-ghost btn-sm btn-full" onclick="addCmdLigne()" style="margin-top:6px">+ Ajouter un produit</button>
@@ -2709,6 +2746,8 @@ window.deleteAvance=deleteAvance;
 
 function avanceCardHtml(a){
 const isEnAttente=a.status==="en_attente";
+const total=avTotalMontant(a);
+const versements=a.versements||[];
 return`<div class="card" style="border-color:${isEnAttente?"#f59e0b55":"#22c55e33"};margin-bottom:10px">
 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
 <div>
@@ -2718,11 +2757,13 @@ return`<div class="card" style="border-color:${isEnAttente?"#f59e0b55":"#22c55e3
 ${tag(isEnAttente?"🧾 En attente":"✅ Reçue",isEnAttente?"amber":"green")}
 </div>
 <div style="display:flex;justify-content:space-between;padding:6px 0;font-weight:800">
-<span>Montant avancé</span>
-<span style="font-family:monospace;color:var(--amber)">${cfa(a.montant)}</span>
+<span>Montant total avancé</span>
+<span style="font-family:monospace;color:var(--amber)">${cfa(total)}</span>
 </div>
+${versements.length?`<div style="font-size:10px;color:var(--muted);margin-bottom:6px">Initial: ${cfa(a.montant)}${versements.map(v=>` · +${cfa(v.montant)} (${v.date})`).join("")}</div>`:""}
 ${a.note?`<div style="font-size:11px;color:var(--muted);margin:4px 0 8px;font-style:italic">${a.note}</div>`:""}
 ${isEnAttente?`<div style="display:flex;gap:8px;margin-top:4px">
+<button class="btn btn-amber btn-sm" style="flex:2" onclick="openAvanceTopUp('${a._key}')">🧾 + Versement</button>
 <button class="btn btn-green" style="flex:3" onclick="clorerAvance('${a._key}')">📦 Marchandise reçue</button>
 <button class="btn btn-red btn-sm" onclick="deleteAvance('${a._key}')">✕</button>
 </div>`:`<button class="btn btn-ghost btn-sm btn-full" onclick="deleteAvance('${a._key}')">✕ Supprimer</button>`}
@@ -3064,7 +3105,7 @@ const totalEnAttente=enAttente.reduce((a,c)=>a+(+c.totalMontant||0),0);
 const avances=getAvances();
 const avEnAttente=avances.filter(a=>a.status==="en_attente");
 const avRecues=avances.filter(a=>a.status==="reçue");
-const totalAvEnAttente=avEnAttente.reduce((a,x)=>a+(+x.montant||0),0);
+const totalAvEnAttente=avEnAttente.reduce((a,x)=>a+avTotalMontant(x),0);
 const commandesClients=getCommandesClients();
 const ccEnAttente=commandesClients.filter(c=>c.status==="en_attente");
 const ccLivrees=commandesClients.filter(c=>c.status==="livrée");
@@ -4095,7 +4136,7 @@ getCommandesClients().forEach(cc=>{(cc.versements||[]).forEach(v=>{_te+=(+v.mont
 getInvestisseurs().forEach(inv=>{if(!inv.dejaUtilise)_te+=(+inv.montant||0);inv.remboursements&&inv.remboursements.forEach(r=>{_ts+=(+r.montant||0);});});
 toArr(fbDepenses).forEach(d=>{if(d.cat&&d.montant)_ts+=(+d.montant||0);else if(d.lignes)(d.lignes||[]).forEach(l=>{if(l.montant)_ts+=(+l.montant||0);});});
 getRetraits().forEach(r=>{_ts+=(+r.montant||0);});
-getAvances().forEach(a=>{_ts+=(+a.montant||0);});
+getAvances().forEach(a=>{_ts+=avTotalMontant(a);});
 getCommandesClients().forEach(cc=>{(cc.paiements||[]).forEach(p=>{_ts+=(+p.montant||0);});});
 (toArr(fbCaisseConfig?.apports||{})).forEach(a=>{const skip=a.note&&(a.note.startsWith("💰 Retrait")||a.note.startsWith("↩ Annul. retrait")||a.note.startsWith("✎ Ajust. retrait"));if(skip)return;if(+a.montant>0)_te+=(+a.montant||0);else _ts+=Math.abs(+a.montant||0);});
 const caisseActuelle=_sd+_te-_ts;
@@ -4106,7 +4147,7 @@ const capitalDepots=getDepots().filter(d=>d.status==="open").reduce((a,d)=>{
 },0);
 const capitalCredits=getCredits().filter(c=>c.status!=="soldé").reduce((a,c)=>a+(+c.montantRestant||0),0);
 const capitalCommandes=capitalEngage;
-const capitalAvances=getAvances().filter(a=>a.status==="en_attente").reduce((a,x)=>a+(+x.montant||0),0);
+const capitalAvances=getAvances().filter(a=>a.status==="en_attente").reduce((a,x)=>a+avTotalMontant(x),0);
 const capitalNetClients=getCommandesClients().filter(c=>c.status==="en_attente").reduce((a,c)=>a+(ccMontantPaye(c)-ccMontantRecu(c)),0);
 const capitalDetteInvestisseurs=getInvestisseurs().reduce((a,inv)=>a+invSoldeDu(inv),0);
 const capitalMobilise=capitalStock+caisseActuelle+capitalDepots+capitalCredits+capitalCommandes+capitalAvances+capitalNetClients-capitalDetteInvestisseurs;
