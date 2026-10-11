@@ -445,14 +445,10 @@ appId:"1:809518599400:web:8e20bd316ed52b57c88d5d"
 const fbApp=initializeApp(firebaseConfig);
 const db=firebase.database();
 
-// ── GEMINI API KEY (jamais écrite dans le code : saisie une fois, gardée sur l'appareil) ──
+// ── GEMINI (optionnel) : aucune clé dans le code. Sans clé, le scan utilise la lecture locale gratuite ──
 function getGeminiKey(){
   let k="";
   try{k=localStorage.getItem("vt_gemini_key")||"";}catch(e){}
-  if(!k){
-    k=(prompt("Clé Gemini requise pour le scan photo.\nColle ta clé ici (elle reste uniquement sur cet appareil) :")||"").trim();
-    if(k){try{localStorage.setItem("vt_gemini_key",k);}catch(e){}}
-  }
   return k;
 }
 function getGeminiUrl(){
@@ -462,7 +458,13 @@ function getGeminiUrl(){
 }
 
 // ── CONSTANTS ──────────────────────────────────────────────────────────────────
-const PW_ADMIN="yh1010",PW_EMPLOYE="Nour1010";
+// Mots de passe : seules les empreintes (SHA-256) sont dans le code, plus les mots de passe en clair
+const PW_ADMIN_H="be758e6d85057a8499030be4b0e051607846b3b93d34c20ae6194076590e8224",PW_EMPLOYE_H="882f2ff303c645c3969d1851b57a23062d06b1ce7d5d2b33277c9d61f845d883";
+async function vtSha256(str){
+  if(!(window.crypto&&crypto.subtle)){alert("Connexion impossible : ouvre l'app avec le lien https (pas un fichier).");return "";}
+  const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode("vt1010|"+str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
 const MONTHS=["Jan","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Déc"];
 const MONTHS_FULL=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
 
@@ -621,7 +623,7 @@ window.openUndoConfirm=openUndoConfirm;
 async function doRestoreUndo(){
 const pw=document.getElementById("undo-pw").value;
 const err=document.getElementById("undo-err");
-if(pw!==PW_ADMIN){err.textContent="❌ Mot de passe incorrect !";return;}
+if((await vtSha256(pw))!==PW_ADMIN_H){err.textContent="❌ Mot de passe incorrect !";return;}
 try{
   const snap=await get(ref(db,"undo_snapshot"));
   if(!snap.val()){alert("Aucun snapshot à restaurer.");return;}
@@ -695,10 +697,11 @@ document.getElementById("card-employe").classList.remove("selected-employe");
 }
 window.backToSelect=backToSelect;
 
-function doLogin(){
+async function doLogin(){
 const pw=document.getElementById("login-pw").value;
-if(selectedLoginRole==="admin"&&pw===PW_ADMIN){role="admin";startApp();}
-else if(selectedLoginRole==="employe"&&pw===PW_EMPLOYE){role="employe";startApp();}
+const hh=await vtSha256(pw);
+if(selectedLoginRole==="admin"&&hh===PW_ADMIN_H){role="admin";startApp();}
+else if(selectedLoginRole==="employe"&&hh===PW_EMPLOYE_H){role="employe";startApp();}
 else{document.getElementById("login-err").textContent="Mot de passe incorrect.";document.getElementById("login-pw").value="";}
 }
 window.doLogin=doLogin;
@@ -1195,6 +1198,150 @@ img.src=url;
 });
 }
 
+// ── LECTURE LOCALE DES RAPPORTS WHATSAPP (sans IA, sans clé) ──
+function _vtNorm(s){return String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");}
+function _vtLev(a,b){
+  const m=a.length,n=b.length;if(!m)return n;if(!n)return m;
+  const d=[];for(let i=0;i<=m;i++){d[i]=[i];}for(let j=1;j<=n;j++)d[0][j]=j;
+  for(let i=1;i<=m;i++)for(let j=1;j<=n;j++){
+    d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]===b[j-1]?0:1));
+  }
+  return d[m][n];
+}
+function _vtPuffsNums(s){
+  const t=_vtNorm(s).replace(/(\d)o/g,"$10").replace(/o(\d)/g,"0$1");const out=[];
+  const re=/(\d{1,3}(?:[.,\s]\d{3})+|\d+)\s*(k)?/g;let m;
+  while((m=re.exec(t))!==null){
+    let v=parseInt(m[1].replace(/[^\d]/g,""),10);
+    if(m[2]&&v<1000)v=v*1000;
+    if(v>=1000)out.push(v);
+  }
+  return out;
+}
+function _vtMatchProduct(text,products){
+  const t=_vtNorm(text).replace(/^\s*\d{1,3}\s+/,"");
+  const words=(t.match(/[a-z]{3,}/g)||[]).filter(w=>w!=="puffs"&&w!=="puff");
+  const nums=_vtPuffsNums(t);
+  let best=null,bestScore=0,ties=0;
+  for(const p of products){
+    const pn=_vtNorm(p.name);
+    const pw=(pn.match(/[a-z]{3,}/g)||[]).filter(w=>w!=="puffs"&&w!=="puff");
+    let brand=false;
+    for(const w of words){for(const x of pw){
+      const lim=Math.max(x.length,w.length)<=5?1:2;
+      if(w===x||_vtLev(w,x)<=lim){brand=true;}
+    }}
+    const pnums=_vtPuffsNums(pn);
+    const puffs=nums.some(n=>pnums.includes(n));
+    const score=(brand?2:0)+(puffs?2:0);
+    if(score>bestScore){bestScore=score;best=p;ties=1;}else if(score===bestScore&&score>0){ties++;}
+  }
+  if(bestScore>=4&&ties===1)return best;
+  if(bestScore>=2&&best&&ties===1){
+    const pn=_vtNorm(best.name);
+    const pw=(pn.match(/[a-z]{3,}/g)||[]).filter(w=>w!=="puffs"&&w!=="puff");
+    const brandOk=words.some(w=>pw.some(x=>w===x||_vtLev(w,x)<=(Math.max(x.length,w.length)<=5?1:2)));
+    if(brandOk)return best;
+  }
+  return null;
+}
+function parseWhatsappReport(text,products){
+  const lines=String(text||"").split(/\r?\n/);
+  const ventes=[];const unknown=[];
+  let client="",gros=false,gift=false,credit=false,depot=false;
+  const reset=()=>{client="";gros=false;gift=false;credit=false;depot=false;};
+  const priceRe=/(?:^|[^\d.,])(\d{1,3})\s*[*xX×✕]\s*(\d{1,3}(?:[.,\s]\d{3})+|\d+)\s*(?:F|f|fcfa|cfa)?/;
+  const flags=(s)=>{
+    const t=_vtNorm(s);
+    if(/gros|gras/.test(t))gros=true;
+    if(/cadeau|offert|gratuit/.test(t))gift=true;
+    if(/(^|[^a-z])(credit|dette|doit|cr)([^a-z]|$)/.test(t))credit=true;
+    if(/depot/.test(t))depot=true;
+  };
+  for(let raw of lines){
+    let line=raw.replace(/[|_]/g," ").trim();
+    if(!line)continue;
+    const hadTime=/\b\d{1,2}:\d{2}\b/.test(line);
+    line=line.replace(/\b\d{1,2}:\d{2}\b/g," ").replace(/[✓✔]+/g," ").trim();
+    if(line){
+      const t=_vtNorm(line);
+      if(/^total\b/.test(t)){ /* fin du message */ }
+      else{
+        const m=line.match(priceRe);
+        if(m){
+          flags(line);
+          const qty=Math.max(1,parseInt(m[1],10));
+          const price=parseInt(m[2].replace(/[^\d]/g,""),10);
+          const nameTxt=line.slice(0,m.index+(m[0].length-m[0].replace(/^[^\d]/,"").length)).replace(/\d{1,2}\s*%/g," ").trim();
+          const p=_vtMatchProduct(nameTxt,products);
+          const v={productId:p?String(p.id):"",productName:p?p.name:nameTxt,qty,price:gift?0:price,
+            type:depot?"depot":(gros?"gros":"detail"),depotNom:"",isGift:gift,isCredit:credit,clientCredit:credit?client:""};
+          ventes.push(v);if(!p)unknown.push(nameTxt);
+        }else if(gift&&/^\s*\d{1,3}\s+[A-Za-zÀ-ÿ]/.test(line)){
+          const qty=Math.max(1,parseInt(line.match(/^\s*(\d{1,3})/)[1],10));
+          const nameTxt=line.replace(/^\s*\d{1,3}\s+/,"").trim();
+          const p=_vtMatchProduct(nameTxt,products);
+          ventes.push({productId:p?String(p.id):"",productName:p?p.name:nameTxt,qty,price:0,type:"detail",depotNom:"",isGift:true,isCredit:false,clientCredit:""});
+          if(!p)unknown.push(nameTxt);
+        }else if(/[A-Za-zÀ-ÿ]{2,}/.test(line)){
+          // ligne d'en-tête : nouveau message
+          reset();flags(line);
+          client=line.replace(/[\(\[\{].*?[\)\]\}]/g," ").replace(/[\(\[\{\)\]\}]/g," ").replace(/(^|\s)(cr[eé]dit|credit|dette|doit|cr)(?=\s|$)/gi," ").replace(/\s+/g," ").trim();
+          if(/^(hier|aujourd)/.test(_vtNorm(client)))reset();
+        }
+      }
+    }
+    if(hadTime)reset();
+  }
+  return {ventes,unknown};
+}
+
+function _vtLoadScript(src){
+  return new Promise((res,rej)=>{
+    if(window.Tesseract)return res();
+    const el=document.createElement("script");
+    el.src=src;el.onload=res;
+    el.onerror=()=>rej(new Error("Impossible de charger le module de lecture (internet requis)."));
+    document.head.appendChild(el);
+  });
+}
+async function scanLocal(files,overlay,status){
+  try{
+    status.textContent="⏳ Chargement du module de lecture...";
+    await _vtLoadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js");
+    const worker=await Tesseract.createWorker("fra",1,{logger:m=>{
+      if(m&&m.status==="recognizing text")status.textContent="⏳ Lecture du texte... "+Math.round((m.progress||0)*100)+"%";
+    }});
+    let text="";
+    for(let i=0;i<files.length;i++){
+      status.textContent=files.length>1?`⏳ Lecture de la photo ${i+1}/${files.length}...`:"⏳ Lecture de la photo...";
+      const r=await worker.recognize(files[i]);
+      text+=(r&&r.data&&r.data.text||"")+"\n";
+    }
+    await worker.terminate();
+    overlay.style.display="none";
+    const res=parseWhatsappReport(text,getProducts());
+    if(!res.ventes.length){
+      alert("⚠️ Aucune vente reconnue.\n\nTexte lu :\n"+text.trim().slice(0,300)+"\n\nAstuce : fais une capture bien nette, sans zoom, avec les messages en entier.");
+      rapportMode="manual";render();return;
+    }
+    currentRapport.ventes=res.ventes.map(v=>({
+      id:Date.now()+Math.random(),
+      productId:v.productId,
+      productName:v.productName,
+      qty:v.qty,price:v.price,type:v.type,depotNom:v.depotNom,
+      isGift:v.isGift,isCredit:v.isCredit,clientCredit:v.clientCredit
+    }));
+    rapportMode="manual";
+    if(res.unknown.length)alert("⚠️ Produit non reconnu pour :\n- "+res.unknown.join("\n- ")+"\n\nChoisis le bon produit à la main dans la liste, puis vérifie les quantités et les prix avant de valider.");
+    render();
+    setTimeout(()=>currentRapport.ventes.forEach(v=>refreshPreview(v.id)),150);
+  }catch(err){
+    overlay.style.display="none";
+    alert("❌ Erreur de lecture : "+(err&&err.message||err));
+  }
+}
+
 async function handlePhoto(event){
 const files=Array.from(event.target.files||[]).slice(0,5);
 if(!files.length)return;
@@ -1202,6 +1349,8 @@ event.target.value="";
 const overlay=document.getElementById("scan-overlay");
 const status=document.getElementById("scan-status");
 overlay.style.display="flex";
+const gUrl=getGeminiUrl();
+if(!gUrl){await scanLocal(files,overlay,status);return;}
 status.textContent=files.length>1?`📷 Lecture de ${files.length} photos...`:"📷 Lecture de la photo...";
 
 let imageParts;
@@ -1247,8 +1396,6 @@ IMPORTANT: Détecte bien les ventes à crédit — souvent noté "Nom client - c
 
 Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans backticks, sans explication:
 {"ventes":[{"productId":1,"productName":"Elf Bar 600","qty":1,"price":3500,"type":"detail","depotNom":"","isGift":false,"isCredit":true,"clientCredit":"Mamadou"}],"notes":""}`;
-const gUrl=getGeminiUrl();
-if(!gUrl){overlay.style.display="none";return;}
 try{
 const controller=new AbortController();
 const timeoutId=setTimeout(()=>controller.abort(),60000);
@@ -3635,6 +3782,11 @@ const html=`<div class="overlay" id="modal-reset" style="display:flex">
 <div class="sheet-handle"></div>
 <div class="sheet-header"><span class="sheet-title">⚙️ Paramètres Admin</span><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-reset');document.getElementById('modal-reset').remove()">✕</button></div>
 <div class="sheet-body">
+<div style="background:#22c55e14;border:1px solid #22c55e33;border-radius:12px;padding:14px;margin-bottom:10px">
+<div style="font-weight:800;font-size:13px;color:var(--green);margin-bottom:6px">💾 Sauvegarder toutes les données</div>
+<div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6">Télécharge un fichier avec toutes tes données (ventes, stock, caisse, crédits...). Fais-le chaque semaine et garde le fichier dans un endroit sûr.</div>
+<button class="btn btn-primary btn-full" onclick="exportBackup()">💾 Sauvegarder maintenant</button>
+</div>
 <div style="background:#3b82f614;border:1px solid #3b82f633;border-radius:12px;padding:14px;margin-bottom:10px">
 <div style="font-weight:800;font-size:13px;color:var(--blue);margin-bottom:6px">🧹 Nettoyer ventes dépôts en double</div>
 <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6">Supprime les anciennes ventes de dépôts-vente dans /sales qui causent un double comptage.</div>
@@ -3666,10 +3818,32 @@ render();
 }
 window.cleanDepotSales=cleanDepotSales;
 
+
+async function exportBackup(){
+  try{
+    const snap=await get(ref(db,"/"));
+    const json=JSON.stringify(snap.val()||{},null,2);
+    const d=new Date();
+    const name="vapetracker-sauvegarde-"+d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")+".json";
+    const blob=new Blob([json],{type:"application/json"});
+    try{
+      const file=new File([blob],name,{type:"application/json"});
+      if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:name});return;}
+    }catch(e){if(e&&e.name==="AbortError")return;}
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);a.download=name;
+    document.body.appendChild(a);a.click();
+    setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1500);
+  }catch(e){
+    alert("❌ Sauvegarde impossible : "+(e&&e.message||e));
+  }
+}
+window.exportBackup=exportBackup;
+
 async function confirmReset(){
 const pw=document.getElementById("reset-pw").value;
 const err=document.getElementById("reset-err");
-if(pw!==PW_ADMIN){
+if((await vtSha256(pw))!==PW_ADMIN_H){
   err.textContent="❌ Mot de passe incorrect.";
   document.getElementById("reset-pw").value="";
   return;
