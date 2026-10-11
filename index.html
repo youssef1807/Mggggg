@@ -445,9 +445,21 @@ appId:"1:809518599400:web:8e20bd316ed52b57c88d5d"
 const fbApp=initializeApp(firebaseConfig);
 const db=firebase.database();
 
-// ── GEMINI API KEY ─────────────────────────────────────────────────────────────
-const GEMINI_API_KEY="AQ.Ab8RN6Je94zduoBGN6rTWjJ9S2ZE7icIUv_GNQVqFKqyFztTew";
-const GEMINI_URL=`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+// ── GEMINI API KEY (jamais écrite dans le code : saisie une fois, gardée sur l'appareil) ──
+function getGeminiKey(){
+  let k="";
+  try{k=localStorage.getItem("vt_gemini_key")||"";}catch(e){}
+  if(!k){
+    k=(prompt("Clé Gemini requise pour le scan photo.\nColle ta clé ici (elle reste uniquement sur cet appareil) :")||"").trim();
+    if(k){try{localStorage.setItem("vt_gemini_key",k);}catch(e){}}
+  }
+  return k;
+}
+function getGeminiUrl(){
+  const k=getGeminiKey();
+  if(!k)return null;
+  return "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key="+encodeURIComponent(k);
+}
 
 // ── CONSTANTS ──────────────────────────────────────────────────────────────────
 const PW_ADMIN="yh1010",PW_EMPLOYE="Nour1010";
@@ -1235,12 +1247,14 @@ IMPORTANT: Détecte bien les ventes à crédit — souvent noté "Nom client - c
 
 Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans backticks, sans explication:
 {"ventes":[{"productId":1,"productName":"Elf Bar 600","qty":1,"price":3500,"type":"detail","depotNom":"","isGift":false,"isCredit":true,"clientCredit":"Mamadou"}],"notes":""}`;
+const gUrl=getGeminiUrl();
+if(!gUrl){overlay.style.display="none";return;}
 try{
 const controller=new AbortController();
 const timeoutId=setTimeout(()=>controller.abort(),60000);
 let resp;
 try{
-resp=await fetch(GEMINI_URL,{
+resp=await fetch(gUrl,{
 method:"POST",
 headers:{"Content-Type":"application/json"},
 signal:controller.signal,
@@ -1258,6 +1272,7 @@ clearTimeout(timeoutId);
 overlay.style.display="none";
 if(!resp.ok){
 let errMsg=`Erreur Gemini (${resp.status})`;
+if(resp.status===400||resp.status===403){try{localStorage.removeItem("vt_gemini_key");}catch(e){}}
 try{const e=await resp.json();errMsg=e?.error?.message||errMsg;}catch{}
 alert("❌ "+errMsg+"\n\nRéessaie — si ça persiste avec plusieurs photos, essaie avec une seule à la fois.");
 return;
