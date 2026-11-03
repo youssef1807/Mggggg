@@ -1218,32 +1218,43 @@ function _vtPuffsNums(s){
   }
   return out;
 }
-function _vtMatchProduct(text,products){
+function _vtMatchProduct(text,products,pct){
   const t=_vtNorm(text).replace(/^\s*\d{1,3}\s+/,"");
   const words=(t.match(/[a-z]{3,}/g)||[]).filter(w=>w!=="puffs"&&w!=="puff");
   const nums=_vtPuffsNums(t);
-  let best=null,bestScore=0,ties=0;
+  const lim=(x,w)=>Math.max(x.length,w.length)<=5?1:2;
+  const cands=[];let bestScore=0;
   for(const p of products){
     const pn=_vtNorm(p.name);
     const pw=(pn.match(/[a-z]{3,}/g)||[]).filter(w=>w!=="puffs"&&w!=="puff");
     let brand=false;
     for(const w of words){for(const x of pw){
-      const lim=Math.max(x.length,w.length)<=5?1:2;
-      if(w===x||_vtLev(w,x)<=lim){brand=true;}
+      if(w===x||_vtLev(w,x)<=lim(x,w)){brand=true;}
     }}
     const pnums=_vtPuffsNums(pn);
     const puffs=nums.some(n=>pnums.includes(n));
     const score=(brand?2:0)+(puffs?2:0);
-    if(score>bestScore){bestScore=score;best=p;ties=1;}else if(score===bestScore&&score>0){ties++;}
+    if(score<=0)continue;
+    if(score>bestScore){bestScore=score;cands.length=0;}
+    if(score===bestScore)cands.push({p,brand,pn});
   }
-  if(bestScore>=4&&ties===1)return best;
-  if(bestScore>=2&&best&&ties===1){
-    const pn=_vtNorm(best.name);
-    const pw=(pn.match(/[a-z]{3,}/g)||[]).filter(w=>w!=="puffs"&&w!=="puff");
-    const brandOk=words.some(w=>pw.some(x=>w===x||_vtLev(w,x)<=(Math.max(x.length,w.length)<=5?1:2)));
-    if(brandOk)return best;
+  if(!cands.length||bestScore<2)return null;
+  let pool=cands;
+  if(pool.length>1){
+    // départage : produit "10%" si la ligne a un pourcentage, sinon produit sans %
+    const withPct=pool.filter(c=>/%/.test(c.pn));
+    const noPct=pool.filter(c=>!/%/.test(c.pn));
+    if(pct){
+      const exact=pool.filter(c=>c.pn.replace(/\s/g,"").indexOf(pct+"%")>=0);
+      pool=exact.length?exact:withPct;
+    }else{
+      pool=noPct;
+    }
   }
-  return null;
+  if(pool.length!==1)return null;
+  const c=pool[0];
+  if(bestScore>=4)return c.p;
+  return c.brand?c.p:null;
 }
 function parseWhatsappReport(text,products){
   const lines=String(text||"").split(/\r?\n/);
@@ -1272,8 +1283,10 @@ function parseWhatsappReport(text,products){
           flags(line);
           const qty=Math.max(1,parseInt(m[1],10));
           const price=parseInt(m[2].replace(/[^\d]/g,""),10);
-          const nameTxt=line.slice(0,m.index+(m[0].length-m[0].replace(/^[^\d]/,"").length)).replace(/\d{1,2}\s*%/g," ").trim();
-          const p=_vtMatchProduct(nameTxt,products);
+          const nameRaw=line.slice(0,m.index+(m[0].length-m[0].replace(/^[^\d]/,"").length));
+          const pm=nameRaw.match(/(\d{1,2})\s*%/);
+          const nameTxt=nameRaw.replace(/\d{1,2}\s*%/g," ").trim();
+          const p=_vtMatchProduct(nameTxt,products,pm?pm[1]:"");
           const v={productId:p?String(p.id):"",productName:p?p.name:nameTxt,qty,price:gift?0:price,
             type:depot?"depot":(gros?"gros":"detail"),depotNom:"",isGift:gift,isCredit:credit,clientCredit:credit?client:""};
           ventes.push(v);if(!p)unknown.push(nameTxt);
