@@ -459,7 +459,7 @@ function getGeminiUrl(){
 
 // ── CONSTANTS ──────────────────────────────────────────────────────────────────
 // Mots de passe : seules les empreintes (SHA-256) sont dans le code, plus les mots de passe en clair
-const PW_ADMIN_H="be758e6d85057a8499030be4b0e051607846b3b93d34c20ae6194076590e8224",PW_EMPLOYE_H="882f2ff303c645c3969d1851b57a23062d06b1ce7d5d2b33277c9d61f845d883";
+const PW_ADMIN_H="69b546b5596194c2475e388121429bdd0bf2ef875ec7651dba36d64cd9db37d6",PW_EMPLOYE_H="0e323578822eb94aa69454e16d0b1876e0ccbbe71f5a66581b4e347da7289dc2";
 async function vtSha256(str){
   if(!(window.crypto&&crypto.subtle)){alert("Connexion impossible : ouvre l'app avec le lien https (pas un fichier).");return "";}
   const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode("vt1010|"+str));
